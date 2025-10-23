@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payment Successful - Gmail AI Assistant</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .container {
+      background: white;
+      border-radius: 16px;
+      padding: 48px;
+      max-width: 500px;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    }
+    .icon { font-size: 72px; margin-bottom: 24px; animation: scaleIn 0.5s ease-out; }
+    @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
+    h1 { font-size: 32px; color: #333; margin-bottom: 16px; }
+    .message { font-size: 16px; color: #666; margin-bottom: 24px; line-height: 1.6; }
+    .status { padding: 16px; border-radius: 8px; margin-bottom: 24px; font-size: 14px; }
+    .status.loading { background: #fff3cd; color: #856404; }
+    .status.success { background: #d4edda; color: #155724; }
+    .status.error { background: #f8d7da; color: #721c24; }
+    .btn { display: inline-block; padding: 14px 32px; background: #667eea; color: white;
+           text-decoration: none; border-radius: 8px; font-weight: 600; transition: all 0.3s; }
+    .btn:hover { background: #5568d3; transform: translateY(-2px); }
+    .loader { border: 3px solid #f3f3f3; border-top: 3px solid #667eea; border-radius: 50%;
+              width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 16px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="icon">🎉</div>
+    <h1>Payment Successful!</h1>
+    <p class="message">Thank you for upgrading to Premium!</p>
+    <div id="status" class="status loading">
+      <div class="loader"></div>
+      Activating your premium subscription...
+    </div>
+    <p class="message" id="instructions">Please return to your Gmail AI Assistant extension.</p>
+    <a href="#" id="closeBtn" class="btn" style="display:none;">Close this page</a>
+  </div>
+  <script>
+    (async function() {
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const sessionId = urlParams.get('session_id');
+        
+        if (sessionId) {
+          document.getElementById('status').innerHTML = 
+            '<div class="loader"></div>Session ID: ' + sessionId.substring(0, 20) + '...<br>Activating premium...';
+          
+          // Wait a moment for webhook to process
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          document.getElementById('status').className = 'status success';
+          document.getElementById('status').innerHTML = '✅ Premium activated! Please refresh your extension popup.';
+          document.getElementById('instructions').innerHTML = 
+            '<strong>Next steps:</strong><br>1. Close this tab<br>2. Open your Gmail AI Assistant extension<br>3. You should now see the Premium badge!';
+          document.getElementById('closeBtn').style.display = 'inline-block';
+          document.getElementById('closeBtn').onclick = () => window.close();
+        }
+      } catch (error) {
+        document.getElementById('status').className = 'status error';
+        document.getElementById('status').innerHTML = '❌ Error: ' + error.message;
+      }
+    })();
+  </script>
+</body>
+</html>
