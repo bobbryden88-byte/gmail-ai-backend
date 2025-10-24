@@ -12,7 +12,9 @@ const prisma = new PrismaClient();
 const resetLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
   max: 3,
-  message: 'Too many password reset attempts. Please try again later.'
+  message: { error: 'Too many password reset attempts. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
 // POST /api/auth/forgot-password

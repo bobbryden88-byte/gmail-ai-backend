@@ -11,7 +11,9 @@ const prisma = new PrismaClient();
 const aiRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 50, // limit each IP to 50 requests per windowMs
-  message: 'Too many AI requests, please try again later.'
+  message: { error: 'Too many AI requests, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
 // Usage checking middleware
