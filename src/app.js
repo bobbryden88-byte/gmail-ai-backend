@@ -27,6 +27,11 @@ app.use(cors({
       return callback(null, true);
     }
     
+    // Allow same-origin requests (for password reset page)
+    if (origin && origin.includes('vercel.app')) {
+      return callback(null, true);
+    }
+    
     // In production, you might want to restrict this
     if (process.env.NODE_ENV === 'production') {
       return callback(new Error('Not allowed by CORS'));
