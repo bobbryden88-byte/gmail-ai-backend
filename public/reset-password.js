@@ -45,7 +45,7 @@ console.log('🔍 Reset password page JavaScript loaded');
   }, 10000); // 10 second timeout
   
   try {
-    const apiUrl = `http://localhost:3000/api/auth/verify-reset-token?token=${token}`;
+    const apiUrl = `${window.location.origin}/api/auth/verify-reset-token?token=${token}`;
     console.log('📡 Calling:', apiUrl);
     
     const response = await fetch(apiUrl);
@@ -110,7 +110,7 @@ console.log('🔍 Reset password page JavaScript loaded');
       
       try {
         console.log('📡 Sending password reset request...');
-        const response = await fetch('http://localhost:3000/api/auth/reset-password', {
+        const response = await fetch(`${window.location.origin}/api/auth/reset-password`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ token, newPassword })
