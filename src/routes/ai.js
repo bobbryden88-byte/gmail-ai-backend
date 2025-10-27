@@ -126,6 +126,8 @@ router.post('/generate-test', async (req, res) => {
       if (!emailContent || !emailContent.description) {
         return res.status(400).json({ error: 'Email description is required for compose mode' });
       }
+      // Add a dummy body for compose mode to satisfy the AI service
+      emailContent.body = emailContent.description;
     } else {
       if (!emailContent || !emailContent.body) {
         return res.status(400).json({ error: 'Email content is required' });
@@ -208,6 +210,8 @@ router.post('/generate', authenticateToken, aiRateLimit, checkUsageLimit, async 
       if (!emailContent || !emailContent.description) {
         return res.status(400).json({ error: 'Email description is required for compose mode' });
       }
+      // Add a dummy body for compose mode to satisfy the AI service
+      emailContent.body = emailContent.description;
     } else {
       if (!emailContent || !emailContent.body) {
         return res.status(400).json({ error: 'Email content is required' });
