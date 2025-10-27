@@ -119,16 +119,23 @@ const checkUsageLimit = async (req, res, next) => {
 // Test endpoint without authentication (for Chrome extension testing)
 router.post('/generate-test', async (req, res) => {
   try {
-    const { emailContent, style = 'brief' } = req.body;
+    const { emailContent, style = 'brief', mode = 'response' } = req.body;
 
-    if (!emailContent || !emailContent.body) {
-      return res.status(400).json({ error: 'Email content is required' });
+    // For compose mode, we need description instead of body
+    if (mode === 'compose') {
+      if (!emailContent || !emailContent.description) {
+        return res.status(400).json({ error: 'Email description is required for compose mode' });
+      }
+    } else {
+      if (!emailContent || !emailContent.body) {
+        return res.status(400).json({ error: 'Email content is required' });
+      }
     }
 
-    console.log('Test AI request received:', { emailContent, style });
+    console.log('Test AI request received:', { emailContent, style, mode });
 
     // Generate AI response
-    const result = await openaiService.generateEmailResponse(emailContent, style);
+    const result = await openaiService.generateEmailResponse(emailContent, style, mode);
 
     if (!result.success) {
       return res.status(500).json({ error: 'Failed to generate response' });
@@ -194,14 +201,21 @@ router.post('/generate-test', async (req, res) => {
 // Generate AI response
 router.post('/generate', authenticateToken, aiRateLimit, checkUsageLimit, async (req, res) => {
   try {
-    const { emailContent, style = 'brief' } = req.body;
+    const { emailContent, style = 'brief', mode = 'response' } = req.body;
 
-    if (!emailContent || !emailContent.body) {
-      return res.status(400).json({ error: 'Email content is required' });
+    // For compose mode, we need description instead of body
+    if (mode === 'compose') {
+      if (!emailContent || !emailContent.description) {
+        return res.status(400).json({ error: 'Email description is required for compose mode' });
+      }
+    } else {
+      if (!emailContent || !emailContent.body) {
+        return res.status(400).json({ error: 'Email content is required' });
+      }
     }
 
     // Generate AI response
-    const result = await openaiService.generateEmailResponse(emailContent, style);
+    const result = await openaiService.generateEmailResponse(emailContent, style, mode);
 
     if (!result.success) {
       return res.status(500).json({ error: 'Failed to generate response' });

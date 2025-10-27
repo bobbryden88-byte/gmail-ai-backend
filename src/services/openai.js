@@ -5,16 +5,20 @@ const openai = new OpenAI({
 });
 
 class OpenAIService {
-  async generateEmailResponse(emailContent, style = 'brief') {
+  async generateEmailResponse(emailContent, style = 'brief', mode = 'response') {
     try {
-      const prompt = this.buildPrompt(emailContent, style);
+      const prompt = mode === 'compose' ? 
+        this.buildComposePrompt(emailContent, style) : 
+        this.buildResponsePrompt(emailContent, style);
       
       const response = await openai.chat.completions.create({
         model: 'gpt-4-turbo-preview',
         messages: [
           {
             role: 'system',
-            content: 'You are an AI assistant that helps write professional email responses. Always respond with valid JSON containing summary, responses, and actions.'
+            content: mode === 'compose' ? 
+              'You are an AI assistant that helps write professional emails from scratch. Always respond with valid JSON containing summary, responses, and actions.' :
+              'You are an AI assistant that helps write professional email responses. Always respond with valid JSON containing summary, responses, and actions.'
           },
           {
             role: 'user',
@@ -40,7 +44,7 @@ class OpenAIService {
     }
   }
 
-  buildPrompt(emailContent, style) {
+  buildResponsePrompt(emailContent, style) {
     return `
 Analyze this email and generate response suggestions in ${style} style:
 
@@ -60,6 +64,39 @@ Respond with JSON in this exact format:
   "actions": ["action item 1", "action item 2"]
 }
     `;
+  }
+
+  buildComposePrompt(emailContent, style) {
+    const recipient = emailContent.recipient || 'the recipient';
+    const description = emailContent.description || 'the email content';
+    
+    return `
+Write a professional email in ${style} style based on this description:
+
+What to write: "${description}"
+Recipient: ${recipient}
+
+Generate a complete email with subject line and body. Respond with JSON in this exact format:
+{
+  "summary": "Brief description of what the email is about",
+  "responses": [
+    {
+      "label": "Subject Line",
+      "text": "Email subject line"
+    },
+    {
+      "label": "Email Body",
+      "text": "Complete email body text"
+    }
+  ],
+  "actions": ["Send email", "Review before sending", "Add recipient"]
+}
+    `;
+  }
+
+  // Keep the old method for backward compatibility
+  buildPrompt(emailContent, style) {
+    return this.buildResponsePrompt(emailContent, style);
   }
 
   calculateCost(usage) {
