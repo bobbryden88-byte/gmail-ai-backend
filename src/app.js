@@ -80,6 +80,11 @@ app.get('/reset-password', (req, res) => {
   res.sendFile('reset-password.html', { root: path.join(__dirname, '..', 'public') });
 });
 
+// Privacy policy page
+app.get('/privacy-policy', (req, res) => {
+  res.sendFile('privacy-policy.html', { root: path.join(__dirname, '..', 'public') });
+});
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
