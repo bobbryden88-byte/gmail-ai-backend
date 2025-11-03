@@ -99,7 +99,6 @@ app.listen(PORT, () => {
   console.log(`   - POST /api/auth/login`);
   console.log(`   - GET  /api/auth/verify`);
   console.log(`🤖 AI endpoints:`);
-  console.log(`   - POST /api/ai/generate-test (no auth)`);
   console.log(`   - POST /api/ai/generate (requires auth)`);
   console.log(`   - GET  /api/ai/usage`);
   console.log(`💳 Stripe endpoints:`);
