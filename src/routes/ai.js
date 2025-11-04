@@ -117,6 +117,30 @@ const checkUsageLimit = async (req, res, next) => {
 };
 
 
+// Temporary backwards-compatible endpoint for old extension versions
+// Returns helpful error message instead of 404, guides users to log in
+// NOTE: This endpoint does NOT allow unauthenticated AI generation (security maintained)
+router.post('/generate-test', async (req, res) => {
+  // Check if user has auth token in headers
+  const authHeader = req.headers.authorization;
+  
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    // If they have a token, tell them to use /generate endpoint
+    res.status(400).json({
+      error: 'This endpoint is deprecated. Please update your extension to the latest version.',
+      requiresUpdate: true,
+      message: 'Your extension is out of date. Please update from the Chrome Web Store to continue using AI features.'
+    });
+  } else {
+    // No auth token - they need to log in
+    res.status(401).json({
+      error: 'Authentication required. Please log in to use AI features.',
+      requiresAuth: true,
+      message: 'Please log in through the extension popup to access AI features. If you continue to see this error, please update your extension.'
+    });
+  }
+});
+
 // Generate AI response
 router.post('/generate', authenticateToken, aiRateLimit, checkUsageLimit, async (req, res) => {
   try {
