@@ -1,20 +1,21 @@
 const OpenAI = require('openai');
 
-// Check if API key is set
-if (!process.env.OPENAI_API_KEY) {
-  console.error('⚠️ OPENAI_API_KEY is not set in environment variables!');
-  throw new Error('OPENAI_API_KEY is required but not set');
-}
-
 // Initialize OpenAI client - will be recreated with fresh key on each request
-let openaiClient = null;
-
 function getOpenAIClient() {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   
   if (!apiKey) {
-    throw new Error('OPENAI_API_KEY is not set');
+    console.error('⚠️ OPENAI_API_KEY is not set in environment variables!');
+    throw new Error('OPENAI_API_KEY is required but not set');
   }
+
+  // Log key status (without exposing the full key)
+  console.log('🔑 Creating OpenAI client with key:', {
+    hasKey: !!apiKey,
+    keyLength: apiKey.length,
+    keyPrefix: apiKey.substring(0, 15) + '...',
+    keySuffix: '...' + apiKey.substring(apiKey.length - 10)
+  });
 
   // Recreate client to ensure fresh key is used
   return new OpenAI({
