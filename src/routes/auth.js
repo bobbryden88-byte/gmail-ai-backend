@@ -218,6 +218,7 @@ router.post('/google', async (req, res) => {
     console.log('Processing Google OAuth for user:', googleUser.email);
 
     // Find existing user by email or googleId
+    console.log('Searching for user with email:', googleUser.email, 'or googleId:', googleUser.googleId);
     let user = await prisma.user.findFirst({
       where: {
         OR: [
@@ -226,6 +227,7 @@ router.post('/google', async (req, res) => {
         ]
       }
     });
+    console.log('User lookup result:', user ? `Found user ${user.id}` : 'User not found');
 
     if (user) {
       // User exists - update Google info if needed
@@ -255,20 +257,25 @@ router.post('/google', async (req, res) => {
       console.log(`✅ User logged in via Google: ${user.email} (ID: ${user.id})`);
     } else {
       // New user - create account
-      user = await prisma.user.create({
-        data: {
-          email: googleUser.email,
-          name: googleUser.name,
-          googleId: googleUser.googleId,
-          authProvider: 'google',
-          password: null, // Google users don't have passwords
-          isPremium: false,
-          dailyUsage: 0,
-          monthlyUsage: 0
-        }
-      });
-      
-      console.log(`✅ New user registered via Google: ${user.email} (ID: ${user.id})`);
+      console.log('Creating new user for:', googleUser.email);
+      try {
+        user = await prisma.user.create({
+          data: {
+            email: googleUser.email,
+            name: googleUser.name,
+            googleId: googleUser.googleId,
+            authProvider: 'google',
+            password: null, // Google users don't have passwords
+            isPremium: false,
+            dailyUsage: 0,
+            monthlyUsage: 0
+          }
+        });
+        console.log(`✅ New user registered via Google: ${user.email} (ID: ${user.id})`);
+      } catch (createError) {
+        console.error('Error creating user:', createError);
+        throw createError;
+      }
     }
 
     // Generate JWT token (same format as email/password login)
