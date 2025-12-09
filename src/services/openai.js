@@ -3,6 +3,7 @@ const OpenAI = require('openai');
 // Check if API key is set
 if (!process.env.OPENAI_API_KEY) {
   console.error('⚠️ OPENAI_API_KEY is not set in environment variables!');
+  throw new Error('OPENAI_API_KEY is required but not set');
 }
 
 const openai = new OpenAI({
