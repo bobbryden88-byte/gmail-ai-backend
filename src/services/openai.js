@@ -9,18 +9,24 @@ function getOpenAIClient() {
     throw new Error('OPENAI_API_KEY is required but not set');
   }
 
-  // Log key status (without exposing the full key)
-  console.log('🔑 Creating OpenAI client with key:', {
+  // Log key status (without exposing the full key) - CRITICAL DEBUG INFO
+  const keyInfo = {
     hasKey: !!apiKey,
     keyLength: apiKey.length,
-    keyPrefix: apiKey.substring(0, 15) + '...',
-    keySuffix: '...' + apiKey.substring(apiKey.length - 10)
-  });
+    keyPrefix: apiKey.substring(0, 20) + '...',
+    keySuffix: '...' + apiKey.substring(apiKey.length - 15),
+    keyFirstChars: apiKey.substring(0, 30),
+    keyLastChars: apiKey.substring(apiKey.length - 30)
+  };
+  console.log('🔑 Creating OpenAI client with key:', JSON.stringify(keyInfo, null, 2));
 
   // Recreate client to ensure fresh key is used
-  return new OpenAI({
+  const client = new OpenAI({
     apiKey: apiKey,
   });
+  
+  console.log('✅ OpenAI client created successfully');
+  return client;
 }
 
 class OpenAIService {
