@@ -1,5 +1,10 @@
 const OpenAI = require('openai');
 
+// Check if API key is set
+if (!process.env.OPENAI_API_KEY) {
+  console.error('⚠️ OPENAI_API_KEY is not set in environment variables!');
+}
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -37,9 +42,17 @@ class OpenAIService {
       };
     } catch (error) {
       console.error('OpenAI API Error:', error);
+      console.error('OpenAI API Error Details:', {
+        message: error.message,
+        status: error.status,
+        code: error.code,
+        type: error.type,
+        hasApiKey: !!process.env.OPENAI_API_KEY,
+        apiKeyPrefix: process.env.OPENAI_API_KEY ? process.env.OPENAI_API_KEY.substring(0, 10) + '...' : 'MISSING'
+      });
       return {
         success: false,
-        error: error.message
+        error: error.message || 'Unknown OpenAI API error'
       };
     }
   }
