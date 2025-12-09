@@ -111,9 +111,22 @@ app.get('/privacy-policy', (req, res) => {
   res.sendFile('privacy-policy.html', { root: path.join(__dirname, '..', 'public') });
 });
 
-// Health check
+// Health check (no database required)
 app.get('/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+  try {
+    res.json({ 
+      status: 'OK', 
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV || 'development',
+      vercel: !!process.env.VERCEL
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      status: 'ERROR', 
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // Export app for Vercel serverless functions

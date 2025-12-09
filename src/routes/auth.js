@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { PrismaClient } = require('@prisma/client');
 const rateLimit = require('express-rate-limit');
+const { verifyGoogleToken } = require('../services/google-auth');
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -144,51 +145,118 @@ router.post('/login', authLimiter, async (req, res) => {
   }
 });
 
-// Google OAuth callback (for Chrome extension)
+// Google OAuth authentication
 router.post('/google', async (req, res) => {
   try {
-    const { email, name, googleId } = req.body;
+    const { idToken, email, googleId, name, picture } = req.body;
 
-    if (!email || !googleId) {
+    let googleUser;
+
+    // Support both ID token (for web apps) and direct user info (for Chrome extensions)
+    if (idToken) {
+      // Verify Google ID token
+      googleUser = await verifyGoogleToken(idToken);
+    } else if (email && googleId) {
+      // Direct user info from Chrome extension (using access token to get user info)
+      googleUser = {
+        email: email.toLowerCase(),
+        name: name || email.split('@')[0],
+        googleId: googleId,
+        picture: picture
+      };
+    } else {
+      return res.status(400).json({ error: 'Either Google ID token or email and Google ID are required' });
+    }
+    
+    if (!googleUser.email || !googleUser.googleId) {
       return res.status(400).json({ error: 'Email and Google ID are required' });
     }
 
-    // Find or create user
-    let user = await prisma.user.findUnique({
-      where: { email }
+    // Find existing user by email or googleId
+    let user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: googleUser.email },
+          { googleId: googleUser.googleId }
+        ]
+      }
     });
 
-    if (!user) {
+    if (user) {
+      // User exists - update Google info if needed
+      if (!user.googleId || user.googleId !== googleUser.googleId) {
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            googleId: googleUser.googleId,
+            authProvider: 'google',
+            // Update name if not set
+            name: user.name || googleUser.name
+          }
+        });
+      }
+      
+      // If user was created with email/password, link Google account
+      if (user.authProvider !== 'google') {
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            googleId: googleUser.googleId,
+            authProvider: 'google' // Allow both methods
+          }
+        });
+      }
+      
+      console.log(`✅ User logged in via Google: ${user.email} (ID: ${user.id})`);
+    } else {
+      // New user - create account
       user = await prisma.user.create({
         data: {
-          email,
-          name,
-          // Store Google ID for future reference
+          email: googleUser.email,
+          name: googleUser.name,
+          googleId: googleUser.googleId,
+          authProvider: 'google',
+          password: null, // Google users don't have passwords
+          isPremium: false,
+          dailyUsage: 0,
+          monthlyUsage: 0
         }
       });
+      
+      console.log(`✅ New user registered via Google: ${user.email} (ID: ${user.id})`);
     }
 
-    // Generate JWT token
+    // Generate JWT token (same format as email/password login)
     const token = jwt.sign(
-      { userId: user.id, email: user.email },
+      { 
+        userId: user.id, 
+        email: user.email,
+        isPremium: user.isPremium 
+      },
       process.env.JWT_SECRET,
       { expiresIn: '30d' }
     );
 
     res.json({
       success: true,
+      message: 'Google authentication successful',
       token,
       user: {
         id: user.id,
         email: user.email,
         name: user.name,
-        isPremium: user.isPremium
+        isPremium: user.isPremium,
+        dailyUsage: user.dailyUsage || 0,
+        monthlyUsage: user.monthlyUsage || 0
       }
     });
 
   } catch (error) {
     console.error('Google auth error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ 
+      error: 'Failed to authenticate with Google',
+      details: error.message 
+    });
   }
 });
 

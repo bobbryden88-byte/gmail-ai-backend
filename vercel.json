@@ -1,20 +1,14 @@
 {
   "version": 2,
   "buildCommand": "npm install && npx prisma generate",
-  "builds": [
-    {
-      "src": "src/app.js",
-      "use": "@vercel/node"
-    }
-  ],
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "src/app.js"
+      "dest": "/api/index.js"
     }
   ],
   "functions": {
-    "src/app.js": {
+    "api/index.js": {
       "maxDuration": 30
     }
   }

@@ -1,84 +1,88 @@
-// Grant developer/premium access to a specific user
+// Grant premium / developer access to one or more specific users
 const { PrismaClient } = require('@prisma/client');
+const bcrypt = require('bcryptjs');
 require('dotenv').config();
 
 const prisma = new PrismaClient();
 
-const DEVELOPER_EMAIL = 'bob.bryden@brentwood.ca';
+// Usage:
+//   node grant-developer-access.js                     -> updates default emails
+//   node grant-developer-access.js user@example.com    -> updates specific email(s)
+const targetEmails = process.argv.slice(2);
 
-async function grantDeveloperAccess() {
-  try {
-    console.log('🔍 Looking for user:', DEVELOPER_EMAIL);
-    
-    // Find the user
-    let user = await prisma.user.findUnique({
-      where: { email: DEVELOPER_EMAIL }
+if (targetEmails.length === 0) {
+  targetEmails.push(
+    'bob.bryden@brentwood.ca',
+    'reededdy@gmail.com'
+  );
+}
+
+async function grantDeveloperAccess(email) {
+  console.log('\n🔍 Processing user:', email);
+
+  // Look for existing user
+  let user = await prisma.user.findUnique({
+    where: { email }
+  });
+
+  if (!user) {
+    console.log('❌ User not found. Creating premium tester account...');
+
+    const hashedPassword = await bcrypt.hash('developer123', 12);
+
+    user = await prisma.user.create({
+      data: {
+        email,
+        name: email,
+        password: hashedPassword,
+        isPremium: true,
+        dailyUsage: 0,
+        monthlyUsage: 0
+      }
     });
 
-    if (!user) {
-      console.log('❌ User not found. Creating developer account...');
-      
-      // Create the user if they don't exist
-      const bcrypt = require('bcryptjs');
-      const hashedPassword = await bcrypt.hash('developer123', 12);
-      
-      user = await prisma.user.create({
-        data: {
-          email: DEVELOPER_EMAIL,
-          name: 'Bob Bryden (Developer)',
-          password: hashedPassword,
-          isPremium: true,
-          dailyUsage: 0,
-          monthlyUsage: 0
-        }
-      });
-      
-      console.log('✅ Developer account created!');
-      console.log('📧 Email:', user.email);
-      console.log('🔑 Password: developer123');
-      console.log('⚠️  Please change this password after first login!');
-      
-    } else {
-      console.log('✅ User found:', user.email);
-      
-      // Update to premium with unlimited usage
-      user = await prisma.user.update({
-        where: { email: DEVELOPER_EMAIL },
-        data: {
-          isPremium: true
-        }
-      });
-      
-      console.log('✅ User upgraded to premium!');
-    }
+    console.log('✅ Account created with temporary password: developer123');
+    console.log('⚠️  Ask the tester to change this password after first login.');
 
-    // Display user info
-    console.log('\n📊 Developer Account Details:');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('ID:', user.id);
-    console.log('Email:', user.email);
-    console.log('Name:', user.name);
-    console.log('Premium:', user.isPremium ? '✅ YES' : '❌ NO');
-    console.log('Daily Limit:', user.isPremium ? '100' : '10');
-    console.log('Monthly Limit:', user.isPremium ? '3000' : '300');
-    console.log('Current Daily Usage:', user.dailyUsage);
-    console.log('Current Monthly Usage:', user.monthlyUsage);
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-    
-    console.log('🎉 Developer access granted successfully!');
-    console.log('\n📝 Next Steps:');
-    console.log('1. Login to extension with:', DEVELOPER_EMAIL);
-    console.log('2. Enjoy 100 AI responses per day!');
-    console.log('3. Track your usage in the popup');
-    
+  } else {
+    console.log('✅ User found. Upgrading to premium tester...');
+
+    user = await prisma.user.update({
+      where: { email },
+      data: {
+        isPremium: true,
+        dailyUsage: 0,
+        monthlyUsage: 0
+      }
+    });
+  }
+
+  console.log('\n📊 Tester Account Details:');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('ID:', user.id);
+  console.log('Email:', user.email);
+  console.log('Name:', user.name || '(not set)');
+  console.log('Premium:', user.isPremium ? '✅ YES' : '❌ NO');
+  console.log('Current Daily Usage:', user.dailyUsage);
+  console.log('Current Monthly Usage:', user.monthlyUsage);
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+  console.log('🎉 Premium tester access granted successfully!');
+}
+
+async function main() {
+  try {
+    for (const email of targetEmails) {
+      await grantDeveloperAccess(email);
+    }
+    console.log('\n✅ Completed premium access update for all target users.\n');
   } catch (error) {
     console.error('❌ Error granting developer access:', error);
     console.error('Error details:', error.message);
+    process.exitCode = 1;
   } finally {
     await prisma.$disconnect();
   }
 }
 
-// Run the script
-grantDeveloperAccess();
-
+main();

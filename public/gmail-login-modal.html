@@ -1,0 +1,177 @@
+<!-- Gmail Login Modal Component -->
+<!-- This component is injected into Gmail's DOM via content script -->
+<div id="gmail-ai-login-modal" class="gmail-ai-modal-overlay" style="display: none;">
+  <div class="gmail-ai-modal-container">
+    <!-- Close button -->
+    <button class="gmail-ai-modal-close" id="gmail-ai-login-close" aria-label="Close login modal">
+      <span>×</span>
+    </button>
+
+    <!-- Login Form (default view) -->
+    <div id="gmail-ai-login-form" class="gmail-ai-auth-form">
+      <div class="gmail-ai-modal-header">
+        <div class="gmail-ai-modal-icon">🔐</div>
+        <h2 class="gmail-ai-modal-title">Welcome to Gmail AI Assistant</h2>
+        <p class="gmail-ai-modal-subtitle">Sign in to start using AI-powered email responses</p>
+      </div>
+
+      <div id="gmail-ai-login-status" class="gmail-ai-status-message" style="display: none;"></div>
+
+      <form id="gmail-ai-login-form-element">
+        <div class="gmail-ai-form-group">
+          <label for="gmail-ai-login-email">Email Address</label>
+          <input 
+            type="email" 
+            id="gmail-ai-login-email" 
+            name="email" 
+            placeholder="Enter your email" 
+            required 
+            autocomplete="email"
+            class="gmail-ai-input"
+          >
+        </div>
+
+        <div class="gmail-ai-form-group">
+          <label for="gmail-ai-login-password">Password</label>
+          <div class="gmail-ai-password-wrapper">
+            <input 
+              type="password" 
+              id="gmail-ai-login-password" 
+              name="password" 
+              placeholder="Enter your password" 
+              required 
+              autocomplete="current-password"
+              class="gmail-ai-input"
+            >
+            <button type="button" class="gmail-ai-password-toggle" id="gmail-ai-login-password-toggle" aria-label="Toggle password visibility">
+              👁️
+            </button>
+          </div>
+        </div>
+
+        <div class="gmail-ai-form-actions">
+          <button type="button" class="gmail-ai-link-button" id="gmail-ai-show-forgot-password">Forgot Password?</button>
+        </div>
+
+        <button type="submit" class="gmail-ai-button gmail-ai-button-primary" id="gmail-ai-login-submit">
+          Sign In
+        </button>
+
+        <div class="gmail-ai-form-divider">
+          <span>or</span>
+        </div>
+
+        <button type="button" class="gmail-ai-button gmail-ai-button-secondary" id="gmail-ai-show-register">
+          Create New Account
+        </button>
+      </form>
+    </div>
+
+    <!-- Register Form -->
+    <div id="gmail-ai-register-form" class="gmail-ai-auth-form" style="display: none;">
+      <div class="gmail-ai-modal-header">
+        <div class="gmail-ai-modal-icon">✨</div>
+        <h2 class="gmail-ai-modal-title">Create Your Account</h2>
+        <p class="gmail-ai-modal-subtitle">Get started with AI-powered email responses</p>
+      </div>
+
+      <div id="gmail-ai-register-status" class="gmail-ai-status-message" style="display: none;"></div>
+
+      <form id="gmail-ai-register-form-element">
+        <div class="gmail-ai-form-group">
+          <label for="gmail-ai-register-name">Full Name (Optional)</label>
+          <input 
+            type="text" 
+            id="gmail-ai-register-name" 
+            name="name" 
+            placeholder="Enter your name" 
+            autocomplete="name"
+            class="gmail-ai-input"
+          >
+        </div>
+
+        <div class="gmail-ai-form-group">
+          <label for="gmail-ai-register-email">Email Address</label>
+          <input 
+            type="email" 
+            id="gmail-ai-register-email" 
+            name="email" 
+            placeholder="Enter your email" 
+            required 
+            autocomplete="email"
+            class="gmail-ai-input"
+          >
+        </div>
+
+        <div class="gmail-ai-form-group">
+          <label for="gmail-ai-register-password">Password</label>
+          <div class="gmail-ai-password-wrapper">
+            <input 
+              type="password" 
+              id="gmail-ai-register-password" 
+              name="password" 
+              placeholder="Create a password (min 6 characters)" 
+              required 
+              autocomplete="new-password"
+              minlength="6"
+              class="gmail-ai-input"
+            >
+            <button type="button" class="gmail-ai-password-toggle" id="gmail-ai-register-password-toggle" aria-label="Toggle password visibility">
+              👁️
+            </button>
+          </div>
+          <div class="gmail-ai-form-hint">Minimum 6 characters</div>
+        </div>
+
+        <button type="submit" class="gmail-ai-button gmail-ai-button-primary" id="gmail-ai-register-submit">
+          Create Account
+        </button>
+
+        <div class="gmail-ai-form-divider">
+          <span>or</span>
+        </div>
+
+        <button type="button" class="gmail-ai-link-button" id="gmail-ai-show-login">
+          Already have an account? Sign in
+        </button>
+      </form>
+    </div>
+
+    <!-- Forgot Password Form -->
+    <div id="gmail-ai-forgot-password-form" class="gmail-ai-auth-form" style="display: none;">
+      <div class="gmail-ai-modal-header">
+        <div class="gmail-ai-modal-icon">📧</div>
+        <h2 class="gmail-ai-modal-title">Reset Password</h2>
+        <p class="gmail-ai-modal-subtitle">Enter your email to receive a password reset link</p>
+      </div>
+
+      <div id="gmail-ai-forgot-status" class="gmail-ai-status-message" style="display: none;"></div>
+
+      <form id="gmail-ai-forgot-form-element">
+        <div class="gmail-ai-form-group">
+          <label for="gmail-ai-forgot-email">Email Address</label>
+          <input 
+            type="email" 
+            id="gmail-ai-forgot-email" 
+            name="email" 
+            placeholder="Enter your email" 
+            required 
+            autocomplete="email"
+            class="gmail-ai-input"
+          >
+        </div>
+
+        <button type="submit" class="gmail-ai-button gmail-ai-button-primary" id="gmail-ai-forgot-submit">
+          Send Reset Link
+        </button>
+
+        <div class="gmail-ai-form-actions">
+          <button type="button" class="gmail-ai-link-button" id="gmail-ai-back-to-login">
+            ← Back to Sign In
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+

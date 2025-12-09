@@ -1,0 +1,51 @@
+<!-- Gmail AI Assistant - Onboarding Modal -->
+<!-- This component is injected into Gmail's DOM via content script -->
+
+<div id="gmail-ai-onboarding-modal" style="display: none;">
+  <div class="gmail-ai-onboarding-overlay"></div>
+  <div class="gmail-ai-onboarding-card">
+    <button class="gmail-ai-onboarding-close" id="gmail-ai-onboarding-close" aria-label="Close onboarding">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+    
+    <div class="gmail-ai-onboarding-content">
+      <h2 class="gmail-ai-onboarding-title">Welcome to Gmail AI Assistant</h2>
+      <p class="gmail-ai-onboarding-subtitle">Get started in 3 simple steps</p>
+      
+      <div class="gmail-ai-onboarding-steps">
+        <!-- Step 1 -->
+        <div class="gmail-ai-onboarding-step">
+          <div class="gmail-ai-onboarding-step-number">1</div>
+          <div class="gmail-ai-onboarding-step-content">
+            <h3 class="gmail-ai-onboarding-step-title">Click the extension icon</h3>
+            <p class="gmail-ai-onboarding-step-description">Find the Gmail AI Assistant icon in your browser toolbar and click it to open the extension popup.</p>
+          </div>
+        </div>
+        
+        <!-- Step 2 -->
+        <div class="gmail-ai-onboarding-step">
+          <div class="gmail-ai-onboarding-step-number">2</div>
+          <div class="gmail-ai-onboarding-step-content">
+            <h3 class="gmail-ai-onboarding-step-title">Create your AI assistant account</h3>
+            <p class="gmail-ai-onboarding-step-description">Create an account or sign in to start using AI-powered email assistance.</p>
+          </div>
+        </div>
+        
+        <!-- Step 3 -->
+        <div class="gmail-ai-onboarding-step">
+          <div class="gmail-ai-onboarding-step-number">3</div>
+          <div class="gmail-ai-onboarding-step-content">
+            <h3 class="gmail-ai-onboarding-step-title">Start composing an email and click "AI Assist"</h3>
+            <p class="gmail-ai-onboarding-step-description">Open Gmail compose, write your email, and click the "AI Assist" button to get AI-generated responses.</p>
+          </div>
+        </div>
+      </div>
+      
+      <button class="gmail-ai-onboarding-cta" id="gmail-ai-onboarding-got-it">
+        Got it!
+      </button>
+    </div>
+  </div>
+</div>
