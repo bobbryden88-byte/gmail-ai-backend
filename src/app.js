@@ -19,11 +19,20 @@ app.use(cors({
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
-    // Allow Chrome extensions and localhost
-    if (origin.startsWith('chrome-extension://') || 
-        origin.startsWith('http://localhost:') ||
+    // Allow Chrome extensions
+    if (origin.startsWith('chrome-extension://')) {
+      return callback(null, true);
+    }
+    
+    // Allow localhost
+    if (origin.startsWith('http://localhost:') ||
         origin.startsWith('https://localhost:') ||
         origin === 'http://localhost:3000') {
+      return callback(null, true);
+    }
+    
+    // Allow Gmail (for content scripts)
+    if (origin.includes('mail.google.com') || origin.includes('gmail.com')) {
       return callback(null, true);
     }
     
@@ -34,7 +43,10 @@ app.use(cors({
     
     // In production, you might want to restrict this
     if (process.env.NODE_ENV === 'production') {
-      return callback(new Error('Not allowed by CORS'));
+      // In production, be more permissive for Chrome extensions
+      // Chrome extensions can make requests from any page
+      console.log('CORS: Allowing request from:', origin);
+      return callback(null, true);
     }
     
     callback(null, true);
@@ -73,6 +85,11 @@ app.get('/payment-success', (req, res) => {
 
 app.get('/payment-cancelled', (req, res) => {
   res.sendFile('payment-cancelled.html', { root: path.join(__dirname, '..', 'public') });
+});
+
+// Login page
+app.get('/login', (req, res) => {
+  res.sendFile('login.html', { root: path.join(__dirname, '..', 'public') });
 });
 
 // Password reset page
