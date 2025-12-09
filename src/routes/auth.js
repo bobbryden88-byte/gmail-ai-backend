@@ -102,8 +102,18 @@ router.post('/login', authLimiter, async (req, res) => {
       where: { email: email.toLowerCase() }
     });
 
-    if (!user || !user.password) {
+    if (!user) {
+      console.log(`Login attempt for non-existent user: ${email.toLowerCase()}`);
       return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Check if user has a password (might have been created via Google OAuth)
+    if (!user.password) {
+      console.log(`Login attempt for Google OAuth user (no password): ${user.email}`);
+      return res.status(401).json({ 
+        error: 'This account was created with Google Sign-In. Please use "Sign in with Google" instead.',
+        useGoogleSignIn: true
+      });
     }
 
     // Check password
@@ -141,7 +151,18 @@ router.post('/login', authLimiter, async (req, res) => {
 
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ error: 'Failed to login' });
+    console.error('Login error details:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
+    
+    // Provide more specific error messages
+    if (error.message && error.message.includes('Prisma')) {
+      return res.status(500).json({ error: 'Database connection error. Please try again later.' });
+    }
+    
+    res.status(500).json({ error: 'Failed to login. Please try again.' });
   }
 });
 
