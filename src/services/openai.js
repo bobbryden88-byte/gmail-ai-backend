@@ -6,18 +6,21 @@ if (!process.env.OPENAI_API_KEY) {
   throw new Error('OPENAI_API_KEY is required but not set');
 }
 
-// Log key status (without exposing the full key)
-const apiKey = process.env.OPENAI_API_KEY.trim(); // Remove any whitespace
-console.log('OpenAI API Key Status:', {
-  isSet: !!apiKey,
-  length: apiKey.length,
-  startsWith: apiKey.substring(0, 10) + '...',
-  endsWith: '...' + apiKey.substring(apiKey.length - 5)
-});
+// Initialize OpenAI client - will be recreated with fresh key on each request
+let openaiClient = null;
 
-const openai = new OpenAI({
-  apiKey: apiKey,
-});
+function getOpenAIClient() {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  
+  if (!apiKey) {
+    throw new Error('OPENAI_API_KEY is not set');
+  }
+
+  // Recreate client to ensure fresh key is used
+  return new OpenAI({
+    apiKey: apiKey,
+  });
+}
 
 class OpenAIService {
   async generateEmailResponse(emailContent, style = 'brief', mode = 'response') {
@@ -48,6 +51,9 @@ class OpenAIService {
         promptLength: prompt.length,
         mode: mode
       });
+
+      // Get fresh OpenAI client with current API key
+      const openai = getOpenAIClient();
 
       const response = await openai.chat.completions.create({
         model: 'gpt-4o-mini', // Using gpt-4o-mini for better availability and cost
