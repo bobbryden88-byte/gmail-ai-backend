@@ -4,6 +4,15 @@ const helmet = require('helmet');
 const path = require('path');
 require('dotenv').config();
 
+// Handle uncaught errors gracefully for Vercel
+process.on('unhandledRejection', (error) => {
+  console.error('Unhandled promise rejection:', error);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception:', error);
+});
+
 const authRoutes = require('./routes/auth');
 const aiRoutes = require('./routes/ai');
 const userRoutes = require('./routes/users');

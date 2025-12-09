@@ -1,5 +1,6 @@
 {
   "version": 2,
+  "buildCommand": "npm install && npx prisma generate",
   "builds": [
     {
       "src": "src/app.js",
@@ -11,5 +12,10 @@
       "src": "/(.*)",
       "dest": "src/app.js"
     }
-  ]
+  ],
+  "functions": {
+    "src/app.js": {
+      "maxDuration": 30
+    }
+  }
 }
