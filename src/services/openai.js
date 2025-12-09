@@ -2,7 +2,18 @@ const OpenAI = require('openai');
 
 // Initialize OpenAI client - will be recreated with fresh key on each request
 function getOpenAIClient() {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  // Get raw key from environment
+  const rawKey = process.env.OPENAI_API_KEY;
+  const apiKey = rawKey?.trim();
+  
+  console.log('🔍 Raw environment check:', {
+    hasRawKey: !!rawKey,
+    rawKeyLength: rawKey?.length || 0,
+    hasTrimmedKey: !!apiKey,
+    trimmedKeyLength: apiKey?.length || 0,
+    rawKeyType: typeof rawKey,
+    allEnvKeys: Object.keys(process.env).filter(k => k.includes('OPENAI')).join(', ')
+  });
   
   if (!apiKey) {
     console.error('⚠️ OPENAI_API_KEY is not set in environment variables!');
@@ -13,10 +24,12 @@ function getOpenAIClient() {
   const keyInfo = {
     hasKey: !!apiKey,
     keyLength: apiKey.length,
-    keyPrefix: apiKey.substring(0, 20) + '...',
-    keySuffix: '...' + apiKey.substring(apiKey.length - 15),
-    keyFirstChars: apiKey.substring(0, 30),
-    keyLastChars: apiKey.substring(apiKey.length - 30)
+    keyPrefix: apiKey.substring(0, 30) + '...',
+    keySuffix: '...' + apiKey.substring(apiKey.length - 20),
+    keyFirst30: apiKey.substring(0, 30),
+    keyLast30: apiKey.substring(apiKey.length - 30),
+    keyStartsWith: apiKey.startsWith('sk-proj-'),
+    keyEndsWith: apiKey.endsWith('ULL4_mmoA') ? '...ULL4_mmoA ✅' : `...${apiKey.substring(apiKey.length - 10)} ❌`
   };
   console.log('🔑 Creating OpenAI client with key:', JSON.stringify(keyInfo, null, 2));
 
