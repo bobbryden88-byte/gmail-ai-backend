@@ -256,4 +256,17 @@ router.get('/usage', authenticateToken, async (req, res) => {
   });
 });
 
+// Debug endpoint to check API key (temporary)
+router.get('/debug-key', authenticateToken, async (req, res) => {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  res.json({
+    hasKey: !!apiKey,
+    keyLength: apiKey?.length || 0,
+    keyPrefix: apiKey ? apiKey.substring(0, 30) + '...' : 'MISSING',
+    keySuffix: apiKey ? '...' + apiKey.substring(apiKey.length - 20) : 'MISSING',
+    keyEndsCorrectly: apiKey ? apiKey.endsWith('ULL4_mmoA') : false,
+    allOpenAIKeys: Object.keys(process.env).filter(k => k.includes('OPENAI')).join(', ')
+  });
+});
+
 module.exports = router;
