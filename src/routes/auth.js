@@ -169,6 +169,13 @@ router.post('/login', authLimiter, async (req, res) => {
 // Google OAuth authentication
 router.post('/google', async (req, res) => {
   try {
+    console.log('Google OAuth request received:', {
+      hasIdToken: !!req.body.idToken,
+      hasEmail: !!req.body.email,
+      hasGoogleId: !!req.body.googleId,
+      email: req.body.email
+    });
+
     const { idToken, email, googleId, name, picture } = req.body;
 
     let googleUser;
@@ -176,9 +183,19 @@ router.post('/google', async (req, res) => {
     // Support both ID token (for web apps) and direct user info (for Chrome extensions)
     if (idToken) {
       // Verify Google ID token
-      googleUser = await verifyGoogleToken(idToken);
+      try {
+        googleUser = await verifyGoogleToken(idToken);
+        console.log('Google token verified successfully');
+      } catch (tokenError) {
+        console.error('Google token verification failed:', tokenError);
+        return res.status(401).json({ 
+          error: 'Failed to verify Google token',
+          details: tokenError.message 
+        });
+      }
     } else if (email && googleId) {
       // Direct user info from Chrome extension (using access token to get user info)
+      console.log('Using direct user info (no token verification)');
       googleUser = {
         email: email.toLowerCase(),
         name: name || email.split('@')[0],
@@ -186,12 +203,19 @@ router.post('/google', async (req, res) => {
         picture: picture
       };
     } else {
-      return res.status(400).json({ error: 'Either Google ID token or email and Google ID are required' });
+      console.error('Missing required fields for Google OAuth');
+      return res.status(400).json({ 
+        error: 'Either Google ID token or email and Google ID are required',
+        received: { hasIdToken: !!idToken, hasEmail: !!email, hasGoogleId: !!googleId }
+      });
     }
     
     if (!googleUser.email || !googleUser.googleId) {
+      console.error('Invalid googleUser object:', googleUser);
       return res.status(400).json({ error: 'Email and Google ID are required' });
     }
+
+    console.log('Processing Google OAuth for user:', googleUser.email);
 
     // Find existing user by email or googleId
     let user = await prisma.user.findFirst({
