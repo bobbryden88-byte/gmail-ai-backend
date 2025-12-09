@@ -6,15 +6,13 @@ if (!process.env.OPENAI_API_KEY) {
   throw new Error('OPENAI_API_KEY is required but not set');
 }
 
-// Log key info for debugging (safely - no full key)
+// Log key status (without exposing the full key)
 const apiKey = process.env.OPENAI_API_KEY.trim(); // Remove any whitespace
-console.log('OpenAI API Key Info:', {
-  hasKey: !!apiKey,
-  keyLength: apiKey.length,
-  keyPrefix: apiKey.substring(0, 10),
-  keySuffix: apiKey.substring(apiKey.length - 5),
-  startsWithSk: apiKey.startsWith('sk-'),
-  hasWhitespace: apiKey !== process.env.OPENAI_API_KEY
+console.log('OpenAI API Key Status:', {
+  isSet: !!apiKey,
+  length: apiKey.length,
+  startsWith: apiKey.substring(0, 10) + '...',
+  endsWith: '...' + apiKey.substring(apiKey.length - 5)
 });
 
 const openai = new OpenAI({
@@ -60,12 +58,7 @@ class OpenAIService {
         code: error.code,
         type: error.type,
         hasApiKey: !!process.env.OPENAI_API_KEY,
-        apiKeyLength: process.env.OPENAI_API_KEY ? process.env.OPENAI_API_KEY.length : 0,
-        apiKeyPrefix: process.env.OPENAI_API_KEY ? process.env.OPENAI_API_KEY.substring(0, 10) + '...' : 'MISSING',
-        apiKeySuffix: process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.length > 5 
-          ? '...' + process.env.OPENAI_API_KEY.substring(process.env.OPENAI_API_KEY.length - 5) 
-          : 'N/A',
-        errorResponse: error.response ? JSON.stringify(error.response.data || error.response) : 'No response data'
+        apiKeyPrefix: process.env.OPENAI_API_KEY ? process.env.OPENAI_API_KEY.substring(0, 10) + '...' : 'MISSING'
       });
       return {
         success: false,
