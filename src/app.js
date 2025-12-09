@@ -107,23 +107,27 @@ app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
-  console.log(`🔐 Auth endpoints:`);
-  console.log(`   - POST /api/auth/register`);
-  console.log(`   - POST /api/auth/login`);
-  console.log(`   - GET  /api/auth/verify`);
-  console.log(`🤖 AI endpoints:`);
-  console.log(`   - POST /api/ai/generate (requires auth)`);
-  console.log(`   - GET  /api/ai/usage`);
-  console.log(`💳 Stripe endpoints:`);
-  console.log(`   - GET  /api/stripe/pricing`);
-  console.log(`   - POST /api/stripe/create-checkout-session`);
-  console.log(`   - POST /api/stripe/success`);
-  console.log(`   - POST /api/stripe/cancel-subscription`);
-  console.log(`   - GET  /api/stripe/subscription-status`);
-});
-
+// Export app for Vercel serverless functions
 module.exports = app;
+
+// Only start server if not in Vercel environment
+if (process.env.VERCEL !== '1' && !process.env.VERCEL_ENV) {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+    console.log(`🔐 Auth endpoints:`);
+    console.log(`   - POST /api/auth/register`);
+    console.log(`   - POST /api/auth/login`);
+    console.log(`   - GET  /api/auth/verify`);
+    console.log(`🤖 AI endpoints:`);
+    console.log(`   - POST /api/ai/generate (requires auth)`);
+    console.log(`   - GET  /api/ai/usage`);
+    console.log(`💳 Stripe endpoints:`);
+    console.log(`   - GET  /api/stripe/pricing`);
+    console.log(`   - POST /api/stripe/create-checkout-session`);
+    console.log(`   - POST /api/stripe/success`);
+    console.log(`   - POST /api/stripe/cancel-subscription`);
+    console.log(`   - GET  /api/stripe/subscription-status`);
+  });
+}
