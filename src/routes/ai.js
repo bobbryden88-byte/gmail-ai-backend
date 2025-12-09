@@ -163,7 +163,13 @@ router.post('/generate', authenticateToken, aiRateLimit, checkUsageLimit, async 
     const result = await openaiService.generateEmailResponse(emailContent, style, mode);
 
     if (!result.success) {
-      return res.status(500).json({ error: 'Failed to generate response' });
+      console.error('AI generation failed:', result.error);
+      console.error('Full error details:', JSON.stringify(result, null, 2));
+      return res.status(500).json({ 
+        error: 'Failed to generate response',
+        details: result.error || 'Unknown error',
+        debug: process.env.NODE_ENV === 'development' ? result : undefined
+      });
     }
 
     // Parse the AI response to extract the JSON
