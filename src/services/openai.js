@@ -17,7 +17,7 @@ class OpenAIService {
         this.buildResponsePrompt(emailContent, style);
       
       const response = await openai.chat.completions.create({
-        model: 'gpt-4-turbo-preview',
+        model: 'gpt-4o-mini', // Using gpt-4o-mini for better availability and cost
         messages: [
           {
             role: 'system',
