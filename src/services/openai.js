@@ -22,10 +22,33 @@ const openai = new OpenAI({
 class OpenAIService {
   async generateEmailResponse(emailContent, style = 'brief', mode = 'response') {
     try {
+      // Verify API key before making request
+      const apiKey = process.env.OPENAI_API_KEY?.trim();
+      if (!apiKey) {
+        console.error('❌ OPENAI_API_KEY is missing or empty');
+        return {
+          success: false,
+          error: 'OpenAI API key is not configured'
+        };
+      }
+
+      console.log('🔑 API Key Check:', {
+        hasKey: !!apiKey,
+        keyLength: apiKey.length,
+        keyPrefix: apiKey.substring(0, 15) + '...',
+        keySuffix: '...' + apiKey.substring(apiKey.length - 10)
+      });
+
       const prompt = mode === 'compose' ? 
         this.buildComposePrompt(emailContent, style) : 
         this.buildResponsePrompt(emailContent, style);
       
+      console.log('📤 Sending request to OpenAI:', {
+        model: 'gpt-4o-mini',
+        promptLength: prompt.length,
+        mode: mode
+      });
+
       const response = await openai.chat.completions.create({
         model: 'gpt-4o-mini', // Using gpt-4o-mini for better availability and cost
         messages: [
@@ -42,6 +65,11 @@ class OpenAIService {
         ],
         max_tokens: 800,
         temperature: 0.7,
+      });
+
+      console.log('✅ OpenAI response received:', {
+        hasContent: !!response.choices[0]?.message?.content,
+        tokensUsed: response.usage?.total_tokens
       });
 
       return {
