@@ -5,6 +5,7 @@
   "main": "src/app.js",
   "scripts": {
     "build": "prisma generate && prisma migrate resolve --rolled-back 20251003220722_init && prisma migrate deploy",
+    "postinstall": "prisma generate",
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
     "test": "echo \"Error: no test specified\" && exit 1"
