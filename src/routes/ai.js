@@ -258,14 +258,27 @@ router.get('/usage', authenticateToken, async (req, res) => {
 
 // Debug endpoint to check API key (temporary)
 router.get('/debug-key', authenticateToken, async (req, res) => {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  const rawKey = process.env.OPENAI_API_KEY;
+  const apiKey = rawKey?.trim();
+  
+  // Check for truncation or encoding issues
+  const hasNewlines = rawKey?.includes('\n') || rawKey?.includes('\r');
+  const hasSpaces = rawKey?.includes(' ');
+  const charCodes = rawKey ? Array.from(rawKey.substring(0, 50)).map(c => c.charCodeAt(0)) : [];
+  
   res.json({
     hasKey: !!apiKey,
-    keyLength: apiKey?.length || 0,
-    keyPrefix: apiKey ? apiKey.substring(0, 30) + '...' : 'MISSING',
-    keySuffix: apiKey ? '...' + apiKey.substring(apiKey.length - 20) : 'MISSING',
+    rawKeyLength: rawKey?.length || 0,
+    trimmedKeyLength: apiKey?.length || 0,
+    keyPrefix: apiKey ? apiKey.substring(0, 50) : 'MISSING',
+    keySuffix: apiKey ? '...' + apiKey.substring(apiKey.length - 30) : 'MISSING',
     keyEndsCorrectly: apiKey ? apiKey.endsWith('ULL4_mmoA') : false,
-    allOpenAIKeys: Object.keys(process.env).filter(k => k.includes('OPENAI')).join(', ')
+    expectedLength: 200, // Approximate expected length
+    hasNewlines: hasNewlines,
+    hasSpaces: hasSpaces,
+    first50CharCodes: charCodes,
+    allOpenAIKeys: Object.keys(process.env).filter(k => k.includes('OPENAI')).join(', '),
+    envKeysCount: Object.keys(process.env).filter(k => k.includes('OPENAI')).length
   });
 });
 
