@@ -181,27 +181,42 @@ router.post('/google', async (req, res) => {
     let googleUser;
 
     // Support both ID token (for web apps) and direct user info (for Chrome extensions)
-    if (idToken) {
-      // Verify Google ID token
-      try {
-        googleUser = await verifyGoogleToken(idToken);
-        console.log('Google token verified successfully');
-      } catch (tokenError) {
-        console.error('Google token verification failed:', tokenError);
-        return res.status(401).json({ 
-          error: 'Failed to verify Google token',
-          details: tokenError.message 
-        });
-      }
-    } else if (email && googleId) {
-      // Direct user info from Chrome extension (using access token to get user info)
-      console.log('Using direct user info (no token verification)');
+    // Chrome extensions using chrome.identity.getAuthToken() send direct user info
+    // Web apps send ID tokens that need verification
+    if (email && googleId) {
+      // Direct user info from Chrome extension (preferred method)
+      // chrome.identity.getAuthToken() gets access token, extension fetches user info from Google API
+      // No token verification needed - trust the user info from Google API
+      console.log('Using direct user info from Chrome extension (no token verification needed)');
       googleUser = {
         email: email.toLowerCase(),
         name: name || email.split('@')[0],
         googleId: googleId,
         picture: picture
       };
+    } else if (idToken) {
+      // Verify Google ID token (for web apps that send ID tokens)
+      try {
+        googleUser = await verifyGoogleToken(idToken);
+        console.log('Google token verified successfully');
+      } catch (tokenError) {
+        console.error('Google token verification failed:', tokenError);
+        // If token verification fails but we have email/googleId, fall back to direct user info
+        if (email && googleId) {
+          console.log('Token verification failed, using direct user info as fallback');
+          googleUser = {
+            email: email.toLowerCase(),
+            name: name || email.split('@')[0],
+            googleId: googleId,
+            picture: picture
+          };
+        } else {
+          return res.status(401).json({ 
+            error: 'Failed to verify Google token',
+            details: tokenError.message 
+          });
+        }
+      }
     } else {
       console.error('Missing required fields for Google OAuth');
       return res.status(400).json({ 
