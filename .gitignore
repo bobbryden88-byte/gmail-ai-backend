@@ -86,3 +86,5 @@ Thumbs.db
 # Test files
 test-*.js
 *-test.js.env.backup
+.vercel
+.env*.local

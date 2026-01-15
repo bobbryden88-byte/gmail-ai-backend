@@ -1,76 +1,66 @@
-# 🔧 Fix OAuth Client ID Error
+# 🔧 Fix OAuth Client Type Issue
 
-## Error
-```
-OAuth2 request failed: Service responded with error: 'bad client id'
-```
+## The Problem
 
-## Root Cause
-The OAuth client in Google Cloud Console is likely set to **"Web Application"** instead of **"Chrome Extension"**.
+Your OAuth client shows:
+- **Type:** Chrome Extension ❌
+- **Needed:** Chrome App ✅
 
-Chrome extensions using `chrome.identity.getAuthToken()` **MUST** use a "Chrome Extension" type OAuth client.
+`chrome.identity.getAuthToken()` requires the OAuth client to be configured as **"Chrome App"**, not "Chrome Extension".
 
-## Solution: Create New Chrome Extension OAuth Client
+## Solution: Update OAuth Client
 
-### Step 1: Go to Google Cloud Console
-1. Visit: https://console.cloud.google.com/
-2. Select your project
-3. Go to **APIs & Services** → **Credentials**
+### Step 1: Get Your Extension ID
 
-### Step 2: Create New OAuth Client
-1. Click **"+ CREATE CREDENTIALS"**
-2. Select **"OAuth client ID"**
-3. **Application type:** Select **"Chrome Extension"** ⚠️ (NOT Web Application!)
-4. **Name:** "Inkwell Gmail AI Assistant Extension"
-5. **Item ID:** Leave empty (or enter: `jjpbalnpbnmhbliggpoemmdceikojpld`)
-6. Click **"CREATE"**
+1. Open: `chrome://extensions/`
+2. Enable Developer mode
+3. Find "Inkwell - Gmail AI Assistant"
+4. **Copy the Extension ID** (32 characters)
 
-### Step 3: Copy New Client ID
-- You'll see a popup with the new Client ID
-- Copy it (looks like: `123456789-abcdefghijklmnop.apps.googleusercontent.com`)
+### Step 2: Update OAuth Client in Google Cloud Console
 
-### Step 4: Update Extension Files
+1. Go to: https://console.cloud.google.com/
+2. **APIs & Services** → **Credentials**
+3. Find: "Inkwell Gmail AI Assistant Extension"
+4. Click **Edit** (pencil icon)
+5. **Application type:** Change to **"Chrome App"**
+6. **Application ID:** Paste your Extension ID (from Step 1)
+7. Click **Save**
 
-**Update `manifest.json`:**
-```json
-"oauth2": {
-  "client_id": "YOUR_NEW_CLIENT_ID_HERE.apps.googleusercontent.com",
-  "scopes": [
-    "https://www.googleapis.com/auth/userinfo.email",
-    "https://www.googleapis.com/auth/userinfo.profile"
-  ]
-}
-```
+**OR** if you can't edit the type:
 
-**Update backend `.env`:**
-```
-GOOGLE_CLIENT_ID="YOUR_NEW_CLIENT_ID_HERE.apps.googleusercontent.com"
-```
+1. **Delete** the existing OAuth client
+2. **Create new one:**
+   - Application type: **Chrome App**
+   - Application ID: Your Extension ID
+   - Create
 
-**Update Vercel environment variable:**
-- Go to Vercel dashboard
-- Project → Settings → Environment Variables
-- Update `GOOGLE_CLIENT_ID` with new value
+### Step 3: Verify
 
-### Step 5: Reload Extension
-1. Go to `chrome://extensions/`
-2. Reload "Inkwell - Gmail AI Assistant"
-3. Test Google sign-in again
+The OAuth client should show:
+- ✅ **Type:** Chrome App
+- ✅ **Application ID:** Your Extension ID (32 characters)
+- ✅ **Client ID:** (will be different, that's OK)
 
-## Why This Happens
+### Step 4: Test
 
-- **Web Application** OAuth clients are for web apps (redirect URIs, etc.)
-- **Chrome Extension** OAuth clients are for extensions (uses `chrome.identity.getAuthToken()`)
-- They're different types and not interchangeable
+1. **Wait 1-2 minutes** (Google needs time to update)
+2. **Reload extension:**
+   - Go to `chrome://extensions/`
+   - Click reload on your extension
+3. **Test Google sign-in:**
+   - Open Gmail
+   - Click extension icon
+   - Click "Sign in with Google"
+   - Should work now!
 
-## Verification
+## Why This Matters
 
-After creating the new client, verify:
-- ✅ Application type: **Chrome Extension**
-- ✅ Client ID matches in manifest.json
-- ✅ Extension reloaded
-- ✅ Test sign-in again
+- **Chrome Extension** type: For extensions that use web-based OAuth flows
+- **Chrome App** type: For `chrome.identity.getAuthToken()` API (what you're using)
+
+Since your extension uses `chrome.identity.getAuthToken()`, it **must** be "Chrome App" type.
 
 ---
 
-**Once you have the new Client ID, share it and I'll update all the files!**
+**After updating to "Chrome App" type, Google sign-in should work!**

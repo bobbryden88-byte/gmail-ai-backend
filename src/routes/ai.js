@@ -256,6 +256,79 @@ router.get('/usage', authenticateToken, async (req, res) => {
   });
 });
 
+// Summarize email endpoint
+router.post('/summarize', async (req, res) => {
+  try {
+    const { email, options = {} } = req.body;
+
+    if (!email || !email.body) {
+      return res.status(400).json({ 
+        error: 'Email content is required',
+        received: { hasEmail: !!email, hasBody: !!email?.body }
+      });
+    }
+
+    console.log('📧 Summarize request:', {
+      subject: email.subject,
+      sender: email.sender,
+      bodyLength: email.body?.length || 0
+    });
+
+    // Use the existing OpenAI service to generate summary
+    const result = await openaiService.generateEmailResponse(
+      {
+        subject: email.subject || '',
+        sender: email.sender || '',
+        body: email.body || ''
+      },
+      options.style || 'brief',
+      'response' // mode
+    );
+
+    if (!result.success) {
+      console.error('Summarization failed:', result.error);
+      return res.status(500).json({ 
+        error: 'Failed to generate summary',
+        details: result.error || 'Unknown error'
+      });
+    }
+
+    // Parse the AI response
+    let parsedResponse;
+    try {
+      let cleanResponse = result.response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      parsedResponse = JSON.parse(cleanResponse);
+    } catch (parseError) {
+      console.error('Failed to parse summary response:', parseError);
+      // Return a simple summary if parsing fails
+      parsedResponse = {
+        summary: result.response.substring(0, 200) + (result.response.length > 200 ? '...' : ''),
+        responses: [],
+        actions: []
+      };
+    }
+
+    // Return summary in a clean format
+    res.json({
+      success: true,
+      summary: parsedResponse.summary || 'No summary available',
+      actions: parsedResponse.actions || [],
+      keyPoints: parsedResponse.keyPoints || [],
+      sentiment: parsedResponse.sentiment,
+      urgency: parsedResponse.urgency,
+      tokensUsed: result.tokensUsed,
+      cost: result.cost
+    });
+
+  } catch (error) {
+    console.error('Summarization error:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message 
+    });
+  }
+});
+
 // Debug endpoint removed for production
 // If needed for debugging, uncomment and use temporarily
 
