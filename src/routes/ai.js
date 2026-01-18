@@ -329,6 +329,138 @@ router.post('/summarize', async (req, res) => {
   }
 });
 
+// Generate context-aware reply options
+router.post('/reply-options', authenticateToken, aiRateLimit, async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email || !email.body) {
+      return res.status(400).json({ error: 'Email content is required' });
+    }
+
+    console.log('📧 Reply options request:', {
+      subject: email.subject,
+      sender: email.sender,
+      bodyLength: email.body?.length || 0
+    });
+
+    // Create a prompt to generate context-aware reply options
+    const prompt = `Analyze this email and suggest 3 different response tones that would be appropriate.
+
+Email Subject: ${email.subject || 'No subject'}
+From: ${email.sender || 'Unknown'}
+Body: ${email.body.substring(0, 1500)}
+
+Respond with a JSON object containing an "options" array with exactly 3 options. Each option should have:
+- "label": A short 2-4 word label (e.g., "Accept & Confirm", "Politely Decline", "Request More Info")
+- "description": A brief 10-15 word description of what this response would convey
+- "tone": A single word describing the tone (e.g., "positive", "negative", "neutral", "curious", "grateful", "apologetic")
+
+The options should be contextually appropriate for the email content. For example:
+- Meeting invite → Accept, Decline, Suggest Alternative Time
+- Question → Answer Positively, Answer Negatively, Ask for Clarification
+- Request → Agree to Help, Unable to Help, Need More Details
+- Complaint → Apologize & Resolve, Explain Situation, Request Details
+
+Return ONLY valid JSON, no markdown:
+{"options": [{"label": "...", "description": "...", "tone": "..."}, ...]}`;
+
+    const result = await openaiService.generateRaw(prompt);
+
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to generate options');
+    }
+
+    // Parse the response
+    let options;
+    try {
+      let cleanResponse = result.response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      const parsed = JSON.parse(cleanResponse);
+      options = parsed.options;
+    } catch (parseError) {
+      console.error('Failed to parse reply options:', parseError);
+      // Fallback options
+      options = [
+        { label: "Positive Response", description: "Agree, accept, or respond enthusiastically", tone: "positive" },
+        { label: "Polite Decline", description: "Respectfully decline or say no", tone: "negative" },
+        { label: "Need More Info", description: "Ask questions or request clarification", tone: "neutral" }
+      ];
+    }
+
+    res.json({
+      success: true,
+      options: options
+    });
+
+  } catch (error) {
+    console.error('Reply options error:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+// Generate full reply with specified tone
+router.post('/generate-reply', authenticateToken, aiRateLimit, checkUsageLimit, async (req, res) => {
+  try {
+    const { email, tone } = req.body;
+
+    if (!email || !email.body) {
+      return res.status(400).json({ error: 'Email content is required' });
+    }
+
+    if (!tone) {
+      return res.status(400).json({ error: 'Response tone is required' });
+    }
+
+    console.log('📧 Generate reply request:', {
+      subject: email.subject,
+      sender: email.sender,
+      tone: tone,
+      bodyLength: email.body?.length || 0
+    });
+
+    // Create a prompt to generate a full reply with the selected tone
+    const prompt = `Write a professional email reply with a "${tone}" tone.
+
+Original Email:
+Subject: ${email.subject || 'No subject'}
+From: ${email.sender || 'Unknown'}
+Body: ${email.body.substring(0, 2000)}
+
+Instructions:
+1. Write a complete, professional reply with a "${tone}" tone
+2. Be concise but thorough (2-4 paragraphs)
+3. Include appropriate greeting and sign-off
+4. Match the formality level of the original email
+5. Address the main points of the original email
+
+Return ONLY the email body text (no JSON, no subject line, just the reply content):`;
+
+    const result = await openaiService.generateRaw(prompt);
+
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to generate reply');
+    }
+
+    // Update user usage
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: {
+        dailyUsage: { increment: 1 },
+        monthlyUsage: { increment: 1 }
+      }
+    });
+
+    res.json({
+      success: true,
+      replyBody: result.response.trim()
+    });
+
+  } catch (error) {
+    console.error('Generate reply error:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
 // Debug endpoint removed for production
 // If needed for debugging, uncomment and use temporarily
 

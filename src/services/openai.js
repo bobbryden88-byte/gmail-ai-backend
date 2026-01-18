@@ -181,6 +181,51 @@ Generate a complete email with subject line and body. Respond with JSON in this 
     const outputCost = (usage.completion_tokens / 1000) * 0.03;
     return inputCost + outputCost;
   }
+
+  /**
+   * Generate raw text response from a custom prompt
+   */
+  async generateRaw(prompt) {
+    try {
+      const apiKey = process.env.OPENAI_API_KEY?.trim();
+      if (!apiKey) {
+        return { success: false, error: 'OpenAI API key is not configured' };
+      }
+
+      console.log('📤 Sending raw prompt to OpenAI, length:', prompt.length);
+
+      const openai = getOpenAIClient();
+
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        max_tokens: 1000,
+        temperature: 0.7,
+      });
+
+      console.log('✅ OpenAI raw response received:', {
+        hasContent: !!response.choices[0]?.message?.content,
+        tokensUsed: response.usage?.total_tokens
+      });
+
+      return {
+        success: true,
+        response: response.choices[0].message.content,
+        tokensUsed: response.usage?.total_tokens
+      };
+    } catch (error) {
+      console.error('OpenAI generateRaw error:', error.message);
+      return {
+        success: false,
+        error: error.message || 'Unknown OpenAI API error'
+      };
+    }
+  }
 }
 
 module.exports = new OpenAIService();
