@@ -461,6 +461,79 @@ Return ONLY the email body text (no JSON, no subject line, just the reply conten
   }
 });
 
+// Generate compose email options in different styles
+router.post('/generate-compose', authenticateToken, aiRateLimit, checkUsageLimit, async (req, res) => {
+  try {
+    const { to, subject, description } = req.body;
+
+    if (!to || !subject || !description) {
+      return res.status(400).json({ error: 'To, subject, and description are required' });
+    }
+
+    console.log('📧 Generate compose request:', {
+      to: to,
+      subject: subject,
+      descriptionLength: description?.length || 0
+    });
+
+    // Create a prompt to generate emails in different styles
+    const prompt = `Write 3 complete email drafts in different styles based on this information:
+
+To: ${to}
+Subject: ${subject}
+What to write about: ${description}
+
+Generate complete, ready-to-send email bodies (no subject line, just the body text) in each style:
+1. Professional - formal, business tone, polished language
+2. Casual - friendly, conversational, relaxed
+3. Creative - engaging, unique approach, memorable
+
+Each email should be 3-5 sentences with appropriate greeting and sign-off.
+
+Return ONLY valid JSON with no markdown:
+{"professional": "email body here", "casual": "email body here", "creative": "email body here"}`;
+
+    const result = await openaiService.generateRaw(prompt);
+
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to generate emails');
+    }
+
+    // Parse the response
+    let emails;
+    try {
+      let cleanResponse = result.response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      emails = JSON.parse(cleanResponse);
+    } catch (parseError) {
+      console.error('Failed to parse compose emails:', parseError);
+      // Fallback emails
+      emails = {
+        professional: `Dear ${to.split('@')[0]},\n\nI hope this email finds you well. ${description}\n\nPlease let me know if you have any questions.\n\nBest regards`,
+        casual: `Hey ${to.split('@')[0]}!\n\n${description}\n\nLet me know what you think!\n\nCheers`,
+        creative: `Hi ${to.split('@')[0]}!\n\n${description}\n\nLooking forward to hearing from you!\n\nBest`
+      };
+    }
+
+    // Update user usage
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: {
+        dailyUsage: { increment: 1 },
+        monthlyUsage: { increment: 1 }
+      }
+    });
+
+    res.json({
+      success: true,
+      emails: emails
+    });
+
+  } catch (error) {
+    console.error('Generate compose error:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
 // Debug endpoint removed for production
 // If needed for debugging, uncomment and use temporarily
 
