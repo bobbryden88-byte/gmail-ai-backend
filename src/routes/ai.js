@@ -534,6 +534,75 @@ Return ONLY valid JSON with no markdown:
   }
 });
 
+// Analyze email category for tagging
+router.post('/analyze-category', authenticateToken, aiRateLimit, async (req, res) => {
+  try {
+    const { subject, body, sender } = req.body;
+
+    if (!body && !subject) {
+      return res.status(400).json({ error: 'Email content is required' });
+    }
+
+    console.log('📧 Analyze category request:', {
+      subject: subject?.substring(0, 50),
+      sender: sender,
+      bodyLength: body?.length || 0
+    });
+
+    const prompt = `Categorize this email into exactly ONE category.
+
+From: ${sender || 'Unknown'}
+Subject: ${subject || 'No subject'}
+Body: ${(body || '').substring(0, 800)}
+
+Categories (choose ONE):
+- Marketing (newsletters, promotions, ads, product announcements)
+- Invoice (receipts, bills, payment confirmations, statements)
+- Support (help requests, customer service, tickets)
+- Work (business emails, meetings, projects, colleagues)
+- Social (social media notifications, friend requests, likes)
+- News (articles, digests, news alerts, updates)
+- Urgent (time-sensitive, deadlines, important actions needed)
+- Docs (guides, documentation, terms, policies)
+- Personal (friends, family, personal matters)
+- Shipping (order tracking, delivery updates, shipping confirmations)
+
+Return ONLY valid JSON with no markdown:
+{"category": "Marketing", "confidence": 0.95, "reasoning": "Brief explanation"}`;
+
+    const result = await openaiService.generateRaw(prompt);
+
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to analyze category');
+    }
+
+    let analysis;
+    try {
+      let cleanResponse = result.response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      analysis = JSON.parse(cleanResponse);
+    } catch (parseError) {
+      console.error('Failed to parse category analysis:', parseError);
+      // Default fallback
+      analysis = {
+        category: 'Work',
+        confidence: 0.5,
+        reasoning: 'Could not determine category'
+      };
+    }
+
+    res.json({
+      success: true,
+      category: analysis.category,
+      confidence: analysis.confidence,
+      reasoning: analysis.reasoning
+    });
+
+  } catch (error) {
+    console.error('Analyze category error:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
 // Debug endpoint removed for production
 // If needed for debugging, uncomment and use temporarily
 
