@@ -603,6 +603,96 @@ Return ONLY valid JSON with no markdown:
   }
 });
 
+// Batch classify multiple emails at once (Premium feature)
+router.post('/batch-classify', authenticateToken, async (req, res) => {
+  try {
+    const { emails } = req.body;
+
+    if (!emails || !Array.isArray(emails) || emails.length === 0) {
+      return res.status(400).json({ error: 'emails array is required' });
+    }
+
+    // Limit batch size to prevent abuse
+    const maxBatchSize = 50;
+    const emailsToProcess = emails.slice(0, maxBatchSize);
+
+    console.log(`📧 Batch classify request: ${emailsToProcess.length} emails`);
+
+    const results = [];
+
+    // Process emails in parallel batches of 5 for speed
+    const batchSize = 5;
+    for (let i = 0; i < emailsToProcess.length; i += batchSize) {
+      const batch = emailsToProcess.slice(i, i + batchSize);
+      
+      const batchPromises = batch.map(async (email) => {
+        try {
+          const prompt = `Quickly categorize this email into ONE category.
+
+From: ${email.sender || email.from || 'Unknown'}
+Subject: ${email.subject || 'No subject'}
+Body: ${(email.body || '').substring(0, 300)}
+
+Categories: Marketing, Invoice, Support, Work, Social, News, Urgent, Docs, Personal, Shipping
+
+Return ONLY JSON: {"category": "Marketing", "confidence": 0.9}`;
+
+          const result = await openaiService.generateRaw(prompt);
+
+          if (!result.success) {
+            return {
+              messageId: email.messageId,
+              category: 'Work',
+              confidence: 0.5,
+              error: 'Classification failed'
+            };
+          }
+
+          let classification;
+          try {
+            let cleanResponse = result.response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+            classification = JSON.parse(cleanResponse);
+          } catch (parseError) {
+            classification = { category: 'Work', confidence: 0.5 };
+          }
+
+          return {
+            messageId: email.messageId,
+            category: classification.category,
+            confidence: classification.confidence
+          };
+        } catch (error) {
+          console.error(`Error classifying email ${email.messageId}:`, error.message);
+          return {
+            messageId: email.messageId,
+            category: 'Work',
+            confidence: 0.5,
+            error: error.message
+          };
+        }
+      });
+
+      const batchResults = await Promise.all(batchPromises);
+      results.push(...batchResults);
+
+      console.log(`📧 Batch ${Math.floor(i / batchSize) + 1} complete: ${batchResults.length} classified`);
+    }
+
+    console.log(`✅ Batch classification complete: ${results.length} emails`);
+
+    res.json({
+      success: true,
+      results: results,
+      processed: results.length,
+      total: emails.length
+    });
+
+  } catch (error) {
+    console.error('Batch classify error:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
 // Debug endpoint removed for production
 // If needed for debugging, uncomment and use temporarily
 
