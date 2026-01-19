@@ -693,6 +693,90 @@ Return ONLY JSON: {"category": "Marketing", "confidence": 0.9}`;
   }
 });
 
+// Batch summarize multiple emails (for Unread Summary feature)
+router.post('/summarize-batch', authenticateToken, async (req, res) => {
+  try {
+    const { emails } = req.body;
+
+    if (!emails || !Array.isArray(emails) || emails.length === 0) {
+      return res.status(400).json({ error: 'emails array is required' });
+    }
+
+    // Limit batch size
+    const maxBatchSize = 50;
+    const emailsToProcess = emails.slice(0, maxBatchSize);
+
+    console.log(`📧 Batch summarize request: ${emailsToProcess.length} emails`);
+
+    const summaries = [];
+
+    // Process emails in parallel batches of 5 for speed
+    const batchSize = 5;
+    for (let i = 0; i < emailsToProcess.length; i += batchSize) {
+      const batch = emailsToProcess.slice(i, i + batchSize);
+      
+      const batchPromises = batch.map(async (email, index) => {
+        try {
+          const prompt = `Summarize this email in 1-2 concise sentences. Focus on the key point or action needed.
+
+From: ${email.from || email.sender || 'Unknown'}
+Subject: ${email.subject || 'No subject'}
+Body: ${(email.body || '').substring(0, 500)}
+
+Return ONLY the summary, nothing else.`;
+
+          const result = await openaiService.generateRaw(prompt);
+
+          if (!result.success) {
+            return {
+              messageId: email.messageId,
+              from: email.from || email.sender,
+              subject: email.subject,
+              summary: 'Could not summarize this email.',
+              error: true
+            };
+          }
+
+          return {
+            messageId: email.messageId,
+            from: email.from || email.sender,
+            subject: email.subject,
+            summary: result.response.trim(),
+            category: email.category || null
+          };
+        } catch (error) {
+          console.error(`Error summarizing email ${email.messageId}:`, error.message);
+          return {
+            messageId: email.messageId,
+            from: email.from || email.sender,
+            subject: email.subject,
+            summary: 'Error summarizing this email.',
+            error: true
+          };
+        }
+      });
+
+      const batchResults = await Promise.all(batchPromises);
+      summaries.push(...batchResults);
+
+      console.log(`📧 Batch ${Math.floor(i / batchSize) + 1} complete: ${batchResults.length} summarized`);
+    }
+
+    console.log(`✅ Batch summarization complete: ${summaries.length} emails`);
+
+    res.json({
+      success: true,
+      summaries: summaries,
+      processed: summaries.length,
+      total: emails.length
+    });
+
+  } catch (error) {
+    console.error('Batch summarize error:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
 // Debug endpoint removed for production
 // If needed for debugging, uncomment and use temporarily
 
