@@ -148,7 +148,7 @@ router.post('/downgrade', authenticateToken, async (req, res) => {
       where: { id: req.user.id },
       data: {
         isPremium: false,
-        subscriptionId: null
+        stripeSubscriptionId: null
       }
     });
 

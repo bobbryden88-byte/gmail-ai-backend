@@ -29,53 +29,143 @@ router.get('/pricing', async (req, res) => {
   }
 });
 
+// Get trial status for current user
+router.get('/trial-status', authenticateToken, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: {
+        id: true,
+        email: true,
+        isPremium: true,
+        subscriptionStatus: true,
+        trialStartDate: true,
+        trialEndDate: true,
+        planType: true,
+        stripeSubscriptionId: true,
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Calculate trial days remaining
+    const isTrialing = user.subscriptionStatus === 'trialing';
+    let trialDaysRemaining = 0;
+    
+    if (isTrialing && user.trialEndDate) {
+      const now = new Date();
+      const trialEnd = new Date(user.trialEndDate);
+      trialDaysRemaining = Math.max(0, Math.ceil((trialEnd - now) / (1000 * 60 * 60 * 24)));
+    }
+
+    // Check if user has ever had a trial (to prevent re-trials)
+    const hasUsedTrial = user.trialStartDate !== null || user.subscriptionStatus !== null;
+
+    res.json({
+      success: true,
+      trial: {
+        isTrialing: isTrialing,
+        trialDaysRemaining: trialDaysRemaining,
+        trialStartDate: user.trialStartDate,
+        trialEndDate: user.trialEndDate,
+        hasUsedTrial: hasUsedTrial,
+      },
+      subscription: {
+        status: user.subscriptionStatus,
+        planType: user.planType,
+        isPremium: user.isPremium,
+        hasSubscription: !!user.stripeSubscriptionId,
+      }
+    });
+  } catch (error) {
+    console.error('Trial status error:', error);
+    res.status(500).json({ error: 'Failed to get trial status' });
+  }
+});
+
 // Create checkout session (requires authentication)
+// Accepts: { plan: 'monthly' | 'yearly' } or { planType: 'monthly' | 'yearly' }
+// Returns: { success: true, url: checkoutUrl, sessionId, trialDays, planType }
 router.post('/create-checkout-session', authenticateToken, stripeLimiter, async (req, res) => {
   try {
-    const { planType = 'monthly' } = req.body; // 'monthly' or 'yearly'
+    // Support both 'plan' and 'planType' for compatibility
+    const planType = req.body.plan || req.body.planType || 'monthly';
     const userId = req.user.id;
 
     if (!['monthly', 'yearly'].includes(planType)) {
-      return res.status(400).json({ error: 'Plan type must be "monthly" or "yearly"' });
+      return res.status(400).json({ 
+        error: 'Plan type must be "monthly" or "yearly"',
+        received: planType
+      });
     }
 
     // Check if user already has an active subscription
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { isPremium: true, subscriptionId: true }
+      select: { 
+        isPremium: true, 
+        stripeSubscriptionId: true, 
+        subscriptionStatus: true 
+      }
     });
 
-    if (user.isPremium) {
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Allow upgrade if subscription is canceled or they're on freemium
+    if (user.isPremium && 
+        user.subscriptionStatus !== 'canceled' && 
+        user.subscriptionStatus !== 'freemium' &&
+        user.stripeSubscriptionId) {
       return res.status(400).json({ 
         error: 'User already has an active premium subscription',
-        alreadyPremium: true 
+        alreadyPremium: true,
+        subscriptionStatus: user.subscriptionStatus
       });
     }
 
-      // Simple success/cancel URLs - extension will handle status refresh
-      const successUrl = `http://localhost:3000/payment-success?session_id={CHECKOUT_SESSION_ID}`;
-      const cancelUrl = `http://localhost:3000/payment-cancelled`;
+    // Use environment variable for base URL, fallback to production
+    const baseUrl = process.env.FRONTEND_URL || 'https://gmail-ai-backend.vercel.app';
+    const successUrl = `${baseUrl}/payment-success.html?session_id={CHECKOUT_SESSION_ID}`;
+    const cancelUrl = `${baseUrl}/payment-cancelled.html`;
+
+    console.log(`📝 Creating checkout session for user ${userId}, plan: ${planType}`);
 
     const result = await StripeService.createCheckoutSession(
       userId,
       planType,
       successUrl,
-      cancelUrl
+      cancelUrl,
+      true // Always include trial if user hasn't used it
     );
 
     if (result.success) {
+      console.log(`✅ Checkout session created: ${result.sessionId}`);
       res.json({ 
         success: true, 
         sessionId: result.sessionId, 
         checkoutUrl: result.url,
-        planType: planType
+        url: result.url, // Primary field for extension compatibility
+        planType: result.planType || planType,
+        trialDays: result.trialDays || 0,
+        hasUsedTrial: result.hasUsedTrial || false
       });
     } else {
-      res.status(400).json({ error: result.error });
+      console.error('❌ Checkout session creation failed:', result.error);
+      res.status(400).json({ 
+        error: result.error || 'Failed to create checkout session',
+        details: result.error
+      });
     }
   } catch (error) {
-    console.error('Checkout session error:', error);
-    res.status(500).json({ error: 'Failed to create checkout session' });
+    console.error('❌ Checkout session error:', error);
+    res.status(500).json({ 
+      error: 'Failed to create checkout session',
+      message: error.message 
+    });
   }
 });
 
@@ -102,7 +192,7 @@ router.post('/success', authenticateToken, async (req, res) => {
         data: {
           isPremium: true,
           stripeCustomerId: result.subscription.customerId,
-          subscriptionId: result.subscription.id,
+          stripeSubscriptionId: result.subscription.id,
         }
       });
 
@@ -111,7 +201,7 @@ router.post('/success', authenticateToken, async (req, res) => {
         id: updatedUser.id,
         email: updatedUser.email,
         isPremium: updatedUser.isPremium,
-        subscriptionId: updatedUser.subscriptionId
+        subscriptionId: updatedUser.stripeSubscriptionId
       });
 
       res.json({ 
@@ -121,7 +211,7 @@ router.post('/success', authenticateToken, async (req, res) => {
           id: updatedUser.id,
           email: updatedUser.email,
           isPremium: updatedUser.isPremium,
-          subscriptionId: updatedUser.subscriptionId,
+          subscriptionId: updatedUser.stripeSubscriptionId,
         }
       });
     } else {
@@ -144,7 +234,7 @@ router.post('/cancel-subscription', authenticateToken, stripeLimiter, async (req
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { 
-        subscriptionId: true, 
+        stripeSubscriptionId: true, 
         isPremium: true,
         email: true,
         stripeCustomerId: true
@@ -153,17 +243,17 @@ router.post('/cancel-subscription', authenticateToken, stripeLimiter, async (req
 
     console.log('User subscription info:', {
       email: user.email,
-      subscriptionId: user.subscriptionId,
+      subscriptionId: user.stripeSubscriptionId,
       isPremium: user.isPremium,
       stripeCustomerId: user.stripeCustomerId
     });
 
-    if (!user.subscriptionId) {
+    if (!user.stripeSubscriptionId) {
       return res.status(400).json({ error: 'No active subscription found' });
     }
 
     // Handle manual activation IDs - try to find real Stripe subscription
-    if (user.subscriptionId.startsWith('manual_activation_')) {
+    if (user.stripeSubscriptionId.startsWith('manual_activation_')) {
       console.log('⚠️ Found manual activation ID, attempting to resolve real Stripe subscription...');
       
       if (!user.stripeCustomerId) {
@@ -200,7 +290,7 @@ router.post('/cancel-subscription', authenticateToken, stripeLimiter, async (req
         await prisma.user.update({
           where: { id: userId },
           data: {
-            subscriptionId: subscription.id,
+            stripeSubscriptionId: subscription.id,
             stripeCustomerId: customer.id
           }
         });
@@ -228,7 +318,7 @@ router.post('/cancel-subscription', authenticateToken, stripeLimiter, async (req
     }
 
     // Cancel at period end (user keeps access until billing period ends)
-    const result = await StripeService.cancelSubscription(user.subscriptionId);
+    const result = await StripeService.cancelSubscription(user.stripeSubscriptionId);
 
     if (result.success) {
       console.log('✅ Subscription cancelled (at period end):', result.subscription);
@@ -264,18 +354,18 @@ router.post('/reactivate-subscription', authenticateToken, stripeLimiter, async 
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { 
-        subscriptionId: true,
+        stripeSubscriptionId: true,
         email: true,
         stripeCustomerId: true
       }
     });
 
-    if (!user.subscriptionId) {
+    if (!user.stripeSubscriptionId) {
       return res.status(400).json({ error: 'No subscription found' });
     }
 
     // Handle manual activation IDs - try to find real Stripe subscription
-    if (user.subscriptionId.startsWith('manual_activation_')) {
+    if (user.stripeSubscriptionId.startsWith('manual_activation_')) {
       console.log('⚠️ Found manual activation ID, attempting to resolve real Stripe subscription...');
       
       if (!user.stripeCustomerId) {
@@ -312,7 +402,7 @@ router.post('/reactivate-subscription', authenticateToken, stripeLimiter, async 
         await prisma.user.update({
           where: { id: userId },
           data: {
-            subscriptionId: subscription.id,
+            stripeSubscriptionId: subscription.id,
             stripeCustomerId: customer.id
           }
         });
@@ -337,7 +427,7 @@ router.post('/reactivate-subscription', authenticateToken, stripeLimiter, async 
       }
     }
 
-    const result = await StripeService.reactivateSubscription(user.subscriptionId);
+    const result = await StripeService.reactivateSubscription(user.stripeSubscriptionId);
 
     if (result.success) {
       console.log('✅ Subscription reactivated:', result.subscription);
@@ -367,7 +457,7 @@ router.get('/subscription-status', authenticateToken, async (req, res) => {
         email: true,
         name: true,
         isPremium: true,
-        subscriptionId: true,
+        stripeSubscriptionId: true,
         stripeCustomerId: true,
         dailyUsage: true,
         monthlyUsage: true,
@@ -379,9 +469,9 @@ router.get('/subscription-status', authenticateToken, async (req, res) => {
     }
 
     let subscriptionDetails = null;
-    if (user.subscriptionId) {
+    if (user.stripeSubscriptionId) {
       // Get full subscription details including cancellation status
-      const result = await StripeService.getSubscriptionDetails(user.subscriptionId);
+      const result = await StripeService.getSubscriptionDetails(user.stripeSubscriptionId);
       if (result.success) {
         subscriptionDetails = result.subscription;
       }
@@ -394,7 +484,7 @@ router.get('/subscription-status', authenticateToken, async (req, res) => {
         email: user.email,
         name: user.name,
         isPremium: user.isPremium,
-        subscriptionId: user.subscriptionId,
+        subscriptionId: user.stripeSubscriptionId,
         dailyUsage: user.dailyUsage,
         monthlyUsage: user.monthlyUsage,
       },
