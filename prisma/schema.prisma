@@ -8,32 +8,53 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  password  String?  // Password for authentication
-  isPremium Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                  String    @id @default(cuid())
+  email               String    @unique
+  name                String?
+  password            String?
+  isPremium           Boolean   @default(false)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
   
-  // Google OAuth - Force Prisma regeneration 2025-12-09
-  googleId     String?  @unique // Google user ID (sub claim from token)
-  authProvider String?  // 'email' or 'google'
+  // Google OAuth
+  googleId            String?   @unique
+  authProvider        String?
   
   // Usage tracking
-  dailyUsage     Int      @default(0)
-  monthlyUsage   Int      @default(0)
-  lastUsageDate  DateTime?
-  lastResetDate  DateTime?
+  dailyUsage          Int       @default(0)
+  monthlyUsage        Int       @default(0)
+  lastUsageDate       DateTime?
+  lastResetDate       DateTime?
   
-  // Subscription
-  stripeCustomerId String?
-  subscriptionId   String?
+  // Stripe & Subscription
+  stripeCustomerId    String?   @unique
+  stripeSubscriptionId String?  @unique
+  
+  // Trial tracking
+  trialStartDate      DateTime?
+  trialEndDate        DateTime?
+  trialActive         Boolean   @default(false)
+  subscriptionStatus  String    @default("none")  // none, trialing, freemium, active, canceled
+  planType            String?
   
   // Password reset
-  resetPasswordToken   String?
-  resetPasswordExpiry  DateTime?
+  resetPasswordToken  String?
+  resetPasswordExpiry DateTime?
   
+  // Relations
+  summaryLogs         SummaryLog[]
+
   @@map("users")
 }
-// Force cache clear Tue Dec  9 20:26:54 GMT 2025
+
+// Track usage for rate limiting
+model SummaryLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String   // "email_summary", "compose", "reply", etc.
+  createdAt DateTime @default(now())
+  
+  @@index([userId, createdAt])
+  @@map("summary_logs")
+}

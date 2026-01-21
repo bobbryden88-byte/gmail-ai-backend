@@ -218,6 +218,18 @@ class GmailAILoginModal {
         // Store token
         await this.saveAuthData(data.token, data.user);
         
+        // Check if user needs to add payment method (card-on-file trial)
+        if (data.requiresPayment && data.checkoutUrl) {
+          this.showStatus('login', '✅ Signed in! Redirecting to add payment method...', 'success');
+          
+          // Redirect to Stripe Checkout for card collection
+          setTimeout(() => {
+            this.hide();
+            this.redirectToCheckout(data.checkoutUrl);
+          }, 1500);
+          return;
+        }
+        
         this.showStatus('login', '✅ Login successful!', 'success');
         
         // Call success callback
@@ -278,6 +290,18 @@ class GmailAILoginModal {
       if (data.success && data.token) {
         // Store token
         await this.saveAuthData(data.token, data.user);
+        
+        // Check if user needs to add payment method (card-on-file trial)
+        if (data.requiresPayment && data.checkoutUrl) {
+          this.showStatus('register', '✅ Account created! Redirecting to start your 30-day free trial...', 'success');
+          
+          // Redirect to Stripe Checkout for card collection
+          setTimeout(() => {
+            this.hide();
+            this.redirectToCheckout(data.checkoutUrl);
+          }, 1500);
+          return;
+        }
         
         this.showStatus('register', '✅ Account created successfully!', 'success');
         
@@ -417,6 +441,29 @@ class GmailAILoginModal {
       });
     } else {
       return localStorage.getItem('gmail-ai-authToken');
+    }
+  }
+
+  /**
+   * Redirect to Stripe Checkout for card collection
+   * Uses chrome.tabs.create in extension context, window.open otherwise
+   */
+  redirectToCheckout(checkoutUrl) {
+    console.log('Redirecting to Stripe Checkout:', checkoutUrl);
+    
+    // Check if we're in a Chrome extension context
+    if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.create) {
+      // Extension context - open in new tab
+      chrome.tabs.create({ url: checkoutUrl });
+    } else if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      // Content script context - send message to background to open tab
+      chrome.runtime.sendMessage({ 
+        action: 'OPEN_CHECKOUT_TAB', 
+        url: checkoutUrl 
+      });
+    } else {
+      // Web context - use window.open
+      window.open(checkoutUrl, '_blank');
     }
   }
 }

@@ -37,11 +37,8 @@ router.post('/register', authLimiter, async (req, res) => {
 
     // Check if user already exists
     const existingUser = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
-      select: {
-        id: true,
-        email: true
-      }
+      where: { email: email.toLowerCase() }
+      // No explicit select - let Prisma return all fields that exist
     });
 
     if (existingUser) {
@@ -133,24 +130,8 @@ router.post('/login', authLimiter, async (req, res) => {
 
     // Find user
     const user = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        password: true,
-        isPremium: true,
-        dailyUsage: true,
-        monthlyUsage: true,
-        subscriptionStatus: true,
-        trialActive: true,
-        trialStartDate: true,
-        trialEndDate: true,
-        stripeSubscriptionId: true,
-        stripeCustomerId: true,
-        planType: true,
-        createdAt: true
-      }
+      where: { email: email.toLowerCase() }
+      // No explicit select - let Prisma return all fields that exist
     });
 
     if (!user) {
@@ -303,32 +284,15 @@ router.post('/google', async (req, res) => {
     console.log('Processing Google OAuth for user:', googleUser.email);
 
     // Find existing user by email or googleId
+    // Note: Using minimal select to avoid Prisma client schema mismatches
     let user = await prisma.user.findFirst({
       where: {
         OR: [
           { email: googleUser.email },
           { googleId: googleUser.googleId }
         ]
-      },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        googleId: true,
-        authProvider: true,
-        password: true,
-        isPremium: true,
-        dailyUsage: true,
-        monthlyUsage: true,
-        subscriptionStatus: true,
-        trialActive: true,
-        trialStartDate: true,
-        trialEndDate: true,
-        stripeSubscriptionId: true,
-        stripeCustomerId: true,
-        planType: true,
-        createdAt: true
       }
+      // No explicit select - let Prisma return all fields that exist
     });
 
     let isNewUser = false;
@@ -460,21 +424,8 @@ router.get('/verify', async (req, res) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        isPremium: true,
-        subscriptionStatus: true,
-        trialActive: true,
-        trialStartDate: true,
-        trialEndDate: true,
-        stripeSubscriptionId: true,
-        stripeCustomerId: true,
-        planType: true,
-        createdAt: true
-      }
+      where: { id: decoded.userId }
+      // No explicit select - let Prisma return all fields that exist
     });
 
     if (!user) {

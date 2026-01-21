@@ -16,13 +16,12 @@ const aiRateLimit = rateLimit({
   legacyHeaders: false,
 });
 
-// Usage checking middleware
+// Usage checking middleware - handles trial, freemium (2/day), and paid users
 const checkUsageLimit = async (req, res, next) => {
   try {
     const user = req.user;
     const today = new Date();
-    const currentMonth = today.getMonth();
-    const currentYear = today.getFullYear();
+    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
 
     // Get fresh user data
     const currentUser = await prisma.user.findUnique({
@@ -33,76 +32,128 @@ const checkUsageLimit = async (req, res, next) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Check if we need to reset daily counter
-    const lastUsageDate = currentUser.lastUsageDate;
-    const isNewDay = !lastUsageDate || 
-                     lastUsageDate.toDateString() !== today.toDateString();
-
-    // Check if we need to reset monthly counter
-    const lastResetDate = currentUser.lastResetDate;
-    const isNewMonth = !lastResetDate || 
-                       lastResetDate.getMonth() !== currentMonth ||
-                       lastResetDate.getFullYear() !== currentYear;
+    // Determine user's plan type and limits
+    const isTrialing = currentUser.subscriptionStatus === 'trialing' || currentUser.trialActive;
+    const isActive = currentUser.subscriptionStatus === 'active';
+    const isFreemium = currentUser.subscriptionStatus === 'freemium';
+    const hasFullAccess = isTrialing || isActive || currentUser.isPremium;
 
     console.log('📊 Usage check:', {
       userId: user.id,
-      isNewDay,
-      isNewMonth,
-      currentDaily: currentUser.dailyUsage,
-      currentMonthly: currentUser.monthlyUsage
+      email: currentUser.email,
+      subscriptionStatus: currentUser.subscriptionStatus,
+      isTrialing,
+      isActive,
+      isFreemium,
+      hasFullAccess
     });
 
-    // Reset counters if needed
-    if (isNewDay || isNewMonth) {
-      const updateData = {};
-      
-      if (isNewDay) {
-        updateData.dailyUsage = 0;
-        updateData.lastUsageDate = today;
-      }
-      
-      if (isNewMonth) {
-        updateData.monthlyUsage = 0;
-        updateData.lastResetDate = today;
-      }
-      
-      await prisma.user.update({
-        where: { id: user.id },
-        data: updateData
+    // FREEMIUM USERS: Check 2 summaries per day limit using SummaryLog
+    if (isFreemium && !hasFullAccess) {
+      const summariesUsedToday = await prisma.summaryLog.count({
+        where: {
+          userId: currentUser.id,
+          createdAt: { gte: todayStart }
+        }
       });
-      
-      currentUser.dailyUsage = updateData.dailyUsage !== undefined ? updateData.dailyUsage : currentUser.dailyUsage;
-      currentUser.monthlyUsage = updateData.monthlyUsage !== undefined ? updateData.monthlyUsage : currentUser.monthlyUsage;
+
+      const FREEMIUM_DAILY_LIMIT = 2;
+
+      console.log(`📊 Freemium user ${currentUser.email}: ${summariesUsedToday}/${FREEMIUM_DAILY_LIMIT} summaries used today`);
+
+      if (summariesUsedToday >= FREEMIUM_DAILY_LIMIT) {
+        return res.status(429).json({
+          error: 'Daily limit reached',
+          message: 'Free users get 2 AI requests per day. Upgrade to Pro for unlimited access!',
+          type: 'freemium_daily_limit',
+          limit: FREEMIUM_DAILY_LIMIT,
+          used: summariesUsedToday,
+          remaining: 0,
+          subscriptionStatus: 'freemium',
+          upgradeUrl: process.env.UPGRADE_URL || 'https://gmail-ai-backend.vercel.app/pricing',
+          benefits: [
+            '✅ Unlimited AI summaries',
+            '✅ Unlimited compose & reply',
+            '✅ Unread email summary',
+            '✅ Auto-labeling'
+          ]
+        });
+      }
+
+      // Store usage info in request for later
+      req.freemiumUsage = {
+        used: summariesUsedToday,
+        limit: FREEMIUM_DAILY_LIMIT,
+        remaining: FREEMIUM_DAILY_LIMIT - summariesUsedToday - 1 // -1 for this request
+      };
     }
 
-    // Define limits
-    const LIMITS = {
-      daily: currentUser.isPremium ? 100 : 10,
-      monthly: currentUser.isPremium ? 3000 : 300
-    };
+    // For trial/paid users: check the old daily/monthly limits (more generous)
+    if (hasFullAccess) {
+      const currentMonth = today.getMonth();
+      const currentYear = today.getFullYear();
 
-    // Check daily limit
-    if (currentUser.dailyUsage >= LIMITS.daily) {
-      return res.status(429).json({
-        error: 'Daily usage limit exceeded',
-        type: 'daily_limit',
-        used: currentUser.dailyUsage,
-        limit: LIMITS.daily,
-        isPremium: currentUser.isPremium,
-        upgradeUrl: process.env.UPGRADE_URL
-      });
-    }
+      // Check if we need to reset daily counter
+      const lastUsageDate = currentUser.lastUsageDate;
+      const isNewDay = !lastUsageDate || 
+                       lastUsageDate.toDateString() !== today.toDateString();
 
-    // Check monthly limit
-    if (currentUser.monthlyUsage >= LIMITS.monthly) {
-      return res.status(429).json({
-        error: 'Monthly usage limit exceeded',
-        type: 'monthly_limit',
-        used: currentUser.monthlyUsage,
-        limit: LIMITS.monthly,
-        isPremium: currentUser.isPremium,
-        upgradeUrl: process.env.UPGRADE_URL
-      });
+      // Check if we need to reset monthly counter
+      const lastResetDate = currentUser.lastResetDate;
+      const isNewMonth = !lastResetDate || 
+                         lastResetDate.getMonth() !== currentMonth ||
+                         lastResetDate.getFullYear() !== currentYear;
+
+      // Reset counters if needed
+      if (isNewDay || isNewMonth) {
+        const updateData = {};
+        
+        if (isNewDay) {
+          updateData.dailyUsage = 0;
+          updateData.lastUsageDate = today;
+        }
+        
+        if (isNewMonth) {
+          updateData.monthlyUsage = 0;
+          updateData.lastResetDate = today;
+        }
+        
+        await prisma.user.update({
+          where: { id: user.id },
+          data: updateData
+        });
+        
+        currentUser.dailyUsage = updateData.dailyUsage !== undefined ? updateData.dailyUsage : currentUser.dailyUsage;
+        currentUser.monthlyUsage = updateData.monthlyUsage !== undefined ? updateData.monthlyUsage : currentUser.monthlyUsage;
+      }
+
+      // Define limits for trial/paid users
+      const LIMITS = {
+        daily: 100,
+        monthly: 3000
+      };
+
+      // Check daily limit
+      if (currentUser.dailyUsage >= LIMITS.daily) {
+        return res.status(429).json({
+          error: 'Daily usage limit exceeded',
+          type: 'daily_limit',
+          used: currentUser.dailyUsage,
+          limit: LIMITS.daily,
+          subscriptionStatus: currentUser.subscriptionStatus
+        });
+      }
+
+      // Check monthly limit
+      if (currentUser.monthlyUsage >= LIMITS.monthly) {
+        return res.status(429).json({
+          error: 'Monthly usage limit exceeded',
+          type: 'monthly_limit',
+          used: currentUser.monthlyUsage,
+          limit: LIMITS.monthly,
+          subscriptionStatus: currentUser.subscriptionStatus
+        });
+      }
     }
 
     // Update req.user with current usage
@@ -115,6 +166,20 @@ const checkUsageLimit = async (req, res, next) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
+
+// Helper function to log usage for freemium tracking
+async function logSummaryUsage(userId, type = 'ai_request') {
+  try {
+    await prisma.summaryLog.create({
+      data: {
+        userId: userId,
+        type: type
+      }
+    });
+  } catch (error) {
+    console.error('Error logging summary usage:', error);
+  }
+}
 
 
 // Temporary backwards-compatible endpoint for old extension versions
@@ -214,13 +279,24 @@ router.post('/generate', authenticateToken, aiRateLimit, checkUsageLimit, async 
       }
     });
 
+    // Log usage for freemium tracking
+    await logSummaryUsage(req.user.id, 'ai_generate');
+
+    // Determine limits based on subscription status
+    const isFreemium = req.user.subscriptionStatus === 'freemium';
+    const hasFullAccess = req.user.subscriptionStatus === 'trialing' || 
+                          req.user.subscriptionStatus === 'active' || 
+                          req.user.trialActive ||
+                          req.user.isPremium;
+
     // Log what we're sending back
     console.log('Sending authenticated response:', {
       summary: parsedResponse.summary,
       responsesCount: parsedResponse.responses.length,
       actionsCount: parsedResponse.actions?.length || 0,
       dailyUsage: updatedUser.dailyUsage,
-      monthlyUsage: updatedUser.monthlyUsage
+      monthlyUsage: updatedUser.monthlyUsage,
+      subscriptionStatus: req.user.subscriptionStatus
     });
 
     res.json({
@@ -231,8 +307,15 @@ router.post('/generate', authenticateToken, aiRateLimit, checkUsageLimit, async 
       usage: {
         dailyUsed: updatedUser.dailyUsage,
         monthlyUsed: updatedUser.monthlyUsage,
-        dailyLimit: updatedUser.isPremium ? 100 : 10,
-        monthlyLimit: updatedUser.isPremium ? 3000 : 300
+        dailyLimit: hasFullAccess ? 100 : 2,
+        monthlyLimit: hasFullAccess ? 3000 : 60,
+        subscriptionStatus: req.user.subscriptionStatus,
+        // For freemium users, include remaining count
+        ...(isFreemium && req.freemiumUsage ? {
+          freemiumUsed: req.freemiumUsage.used + 1,
+          freemiumLimit: req.freemiumUsage.limit,
+          freemiumRemaining: Math.max(0, req.freemiumUsage.remaining)
+        } : {})
       }
     });
 
@@ -256,8 +339,8 @@ router.get('/usage', authenticateToken, async (req, res) => {
   });
 });
 
-// Summarize email endpoint
-router.post('/summarize', async (req, res) => {
+// Summarize email endpoint - now requires auth and has freemium limits
+router.post('/summarize', authenticateToken, checkUsageLimit, async (req, res) => {
   try {
     const { email, options = {} } = req.body;
 
@@ -271,7 +354,9 @@ router.post('/summarize', async (req, res) => {
     console.log('📧 Summarize request:', {
       subject: email.subject,
       sender: email.sender,
-      bodyLength: email.body?.length || 0
+      bodyLength: email.body?.length || 0,
+      userId: req.user.id,
+      subscriptionStatus: req.user.subscriptionStatus
     });
 
     // Use the existing OpenAI service to generate summary
@@ -293,6 +378,18 @@ router.post('/summarize', async (req, res) => {
       });
     }
 
+    // Log usage for freemium tracking
+    await logSummaryUsage(req.user.id, 'email_summary');
+
+    // Update user usage counters
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: {
+        dailyUsage: { increment: 1 },
+        monthlyUsage: { increment: 1 }
+      }
+    });
+
     // Parse the AI response
     let parsedResponse;
     try {
@@ -308,6 +405,9 @@ router.post('/summarize', async (req, res) => {
       };
     }
 
+    // Determine remaining usage for freemium users
+    const isFreemium = req.user.subscriptionStatus === 'freemium';
+    
     // Return summary in a clean format
     res.json({
       success: true,
@@ -317,7 +417,18 @@ router.post('/summarize', async (req, res) => {
       sentiment: parsedResponse.sentiment,
       urgency: parsedResponse.urgency,
       tokensUsed: result.tokensUsed,
-      cost: result.cost
+      cost: result.cost,
+      // Include usage info for freemium users
+      ...(isFreemium && req.freemiumUsage ? {
+        usage: {
+          used: req.freemiumUsage.used + 1,
+          limit: req.freemiumUsage.limit,
+          remaining: Math.max(0, req.freemiumUsage.remaining),
+          message: req.freemiumUsage.remaining > 0 
+            ? `${req.freemiumUsage.remaining} summary left today`
+            : 'Last free summary for today!'
+        }
+      } : {})
     });
 
   } catch (error) {

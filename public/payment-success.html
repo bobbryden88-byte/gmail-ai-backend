@@ -59,19 +59,43 @@
         
         if (sessionId) {
           document.getElementById('status').innerHTML = 
-            '<div class="loader"></div>Session ID: ' + sessionId.substring(0, 20) + '...<br>Activating premium...';
+            '<div class="loader"></div>Processing your subscription...<br>Session: ' + sessionId.substring(0, 20) + '...';
           
-          // Wait a moment for webhook to process
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          // Notify extension if available
+          if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id) {
+            try {
+              chrome.runtime.sendMessage({
+                type: 'CHECKOUT_SUCCESS',
+                sessionId: sessionId
+              });
+              console.log('✅ Notified extension of successful checkout');
+            } catch (e) {
+              console.log('Extension not available:', e.message);
+            }
+          }
+          
+          // Wait for webhook to process (Stripe webhooks are usually instant)
+          await new Promise(resolve => setTimeout(resolve, 3000));
           
           document.getElementById('status').className = 'status success';
-          document.getElementById('status').innerHTML = '✅ Premium activated! Please refresh your extension popup.';
+          document.getElementById('status').innerHTML = '✅ Subscription activated!<br>Your 30-day free trial has started.';
           document.getElementById('instructions').innerHTML = 
-            '<strong>Next steps:</strong><br>1. Close this tab<br>2. Open your Gmail AI Assistant extension<br>3. You should now see the Premium badge!';
+            '<strong>Next steps:</strong><br>1. Close this tab<br>2. Return to Gmail<br>3. Your extension will automatically update to show your trial status!';
           document.getElementById('closeBtn').style.display = 'inline-block';
-          document.getElementById('closeBtn').onclick = () => window.close();
+          document.getElementById('closeBtn').onclick = () => {
+            // Try to close the tab, fallback to redirect
+            if (window.opener) {
+              window.close();
+            } else {
+              window.location.href = 'https://mail.google.com';
+            }
+          };
+        } else {
+          document.getElementById('status').className = 'status error';
+          document.getElementById('status').innerHTML = '⚠️ No session ID found. Please contact support if you completed payment.';
         }
       } catch (error) {
+        console.error('Error:', error);
         document.getElementById('status').className = 'status error';
         document.getElementById('status').innerHTML = '❌ Error: ' + error.message;
       }

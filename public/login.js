@@ -260,11 +260,22 @@ console.log('🔍 Login page JavaScript loaded');
         const data = await response.json();
         
         if (data.success && data.token) {
-          showRegisterStatus('✅ Account created successfully! Redirecting...', 'success', registerStatus);
-          
-          // Store token and redirect or show success
+          // Store token and user data
           localStorage.setItem('authToken', data.token);
           localStorage.setItem('user', JSON.stringify(data.user));
+          
+          // Check if user needs to add payment method (card-on-file trial)
+          if (data.requiresPayment && data.checkoutUrl) {
+            showRegisterStatus('✅ Account created! Redirecting to start your 30-day free trial...', 'success', registerStatus);
+            
+            setTimeout(() => {
+              // Redirect to Stripe Checkout for card collection
+              window.location.href = data.checkoutUrl;
+            }, 1500);
+            return;
+          }
+          
+          showRegisterStatus('✅ Account created successfully! Redirecting...', 'success', registerStatus);
           
           setTimeout(() => {
             // Redirect to extension or show success message
@@ -321,11 +332,23 @@ console.log('🔍 Login page JavaScript loaded');
         
         if (data.success && data.token) {
           console.log('✅ Login successful!');
-          showStatus('✅ Login successful! Redirecting...', 'success');
           
           // Store token and user data
           localStorage.setItem('authToken', data.token);
           localStorage.setItem('user', JSON.stringify(data.user));
+          
+          // Check if user needs to add payment method (card-on-file trial)
+          if (data.requiresPayment && data.checkoutUrl) {
+            showStatus('✅ Signed in! Redirecting to add payment method...', 'success');
+            
+            setTimeout(() => {
+              // Redirect to Stripe Checkout for card collection
+              window.location.href = data.checkoutUrl;
+            }, 1500);
+            return;
+          }
+          
+          showStatus('✅ Login successful! Redirecting...', 'success');
           
           // Check if there's a redirect parameter
           const urlParams = new URLSearchParams(window.location.search);

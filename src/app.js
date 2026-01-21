@@ -18,6 +18,8 @@ const aiRoutes = require('./routes/ai');
 const userRoutes = require('./routes/users');
 const stripeRoutes = require('./routes/stripe');
 const passwordResetRoutes = require('./routes/password-reset');
+const trialRoutes = require('./routes/trial');
+// Cron routes removed - Stripe handles trial expiry automatically
 const openaiService = require('./services/openai');
 
 const app = express();
@@ -63,13 +65,12 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Cron-Secret']
 }));
 
 // Debug middleware
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-  console.log('Headers:', req.headers);
   if (req.body && Object.keys(req.body).length > 0) {
     console.log('Body:', req.body);
   }
@@ -87,6 +88,7 @@ app.use('/api/auth', passwordResetRoutes); // Add password reset routes to auth
 app.use('/api/ai', aiRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/stripe', stripeRoutes);
+app.use('/api/trial', trialRoutes);
 
 // Summarize email endpoint (direct route for /api/summarize)
 app.post('/api/summarize', async (req, res) => {
@@ -225,5 +227,9 @@ if (process.env.VERCEL !== '1' && !process.env.VERCEL_ENV) {
     console.log(`   - POST /api/stripe/success`);
     console.log(`   - POST /api/stripe/cancel-subscription`);
     console.log(`   - GET  /api/stripe/subscription-status`);
+    console.log(`🆓 Trial endpoints:`);
+    console.log(`   - GET  /api/trial/status`);
+    console.log(`⏰ Cron endpoints:`);
+    console.log(`   - POST /api/cron/check-trial-expiry`);
   });
 }

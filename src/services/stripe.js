@@ -5,32 +5,147 @@ const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 const prisma = new PrismaClient();
 
 class StripeService {
-  // Create checkout session for subscription
-  static async createCheckoutSession(userId, planType = 'monthly', successUrl, cancelUrl) {
+  // Create checkout session for new user signup with 30-day trial
+  // This is used during registration - user MUST add card to start trial
+  static async createTrialCheckoutSession(userId, userEmail, successUrl, cancelUrl) {
     try {
-      // Get user email for Stripe
+      const priceId = process.env.STRIPE_PREMIUM_MONTHLY_PRICE_ID;
+      
+      if (!priceId) {
+        throw new Error('STRIPE_PREMIUM_MONTHLY_PRICE_ID not configured');
+      }
+
+      console.log(`Creating trial checkout for new user ${userId}, email: ${userEmail}`);
+
+      const session = await stripe.checkout.sessions.create({
+        customer_email: userEmail,
+        payment_method_types: ['card'],
+        line_items: [
+          {
+            price: priceId,
+            quantity: 1,
+          },
+        ],
+        mode: 'subscription',
+        success_url: successUrl + '?session_id={CHECKOUT_SESSION_ID}',
+        cancel_url: cancelUrl,
+        metadata: {
+          userId: userId,
+          planType: 'monthly',
+          source: 'signup_trial',
+        },
+        allow_promotion_codes: true,
+        billing_address_collection: 'auto',
+        subscription_data: {
+          trial_period_days: 30,
+          metadata: {
+            userId: userId,
+            planType: 'monthly',
+            source: 'signup_trial',
+          },
+        },
+      });
+
+      console.log(`✅ Trial checkout session created: ${session.id} (30-day trial)`);
+      return { 
+        success: true, 
+        sessionId: session.id, 
+        url: session.url,
+        trialDays: 30
+      };
+    } catch (error) {
+      console.error('Stripe trial checkout error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Get or create Stripe customer
+  static async getOrCreateCustomer(userId) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, name: true, stripeCustomerId: true }
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    // Return existing customer if available
+    if (user.stripeCustomerId) {
+      try {
+        const customer = await stripe.customers.retrieve(user.stripeCustomerId);
+        if (!customer.deleted) {
+          return { customerId: user.stripeCustomerId, isNew: false };
+        }
+      } catch (error) {
+        console.log('Existing customer not found in Stripe, creating new one');
+      }
+    }
+
+    // Create new customer
+    const customer = await stripe.customers.create({
+      email: user.email,
+      name: user.name || undefined,
+      metadata: { userId: userId }
+    });
+
+    // Save customer ID to database
+    await prisma.user.update({
+      where: { id: userId },
+      data: { stripeCustomerId: customer.id }
+    });
+
+    console.log(`✅ Created Stripe customer ${customer.id} for user ${userId}`);
+    return { customerId: customer.id, isNew: true };
+  }
+
+  // Create checkout session for subscription
+  // Always includes 30-day trial for new subscriptions (both monthly and yearly)
+  static async createCheckoutSession(userId, planType = 'monthly', successUrl, cancelUrl, includeTrial = true) {
+    try {
+      // Get or create customer
+      const { customerId } = await this.getOrCreateCustomer(userId);
+
+      // Get user to check if they've already used their trial
       const user = await prisma.user.findUnique({
         where: { id: userId },
-        select: { email: true, name: true }
+        select: { 
+          email: true, 
+          name: true, 
+          trialActive: true,
+          trialStartDate: true,
+          trialEndDate: true,
+          subscriptionStatus: true,
+          stripeSubscriptionId: true
+        }
       });
 
       if (!user) {
         throw new Error('User not found');
       }
 
-      // Use your specific Price IDs
+      // Check if user has already had a trial or active subscription
+      const hasUsedTrial = user.trialStartDate !== null || 
+                          user.trialActive === true ||
+                          ['trialing', 'active'].includes(user.subscriptionStatus) ||
+                          user.stripeSubscriptionId !== null;
+
+      // Use your specific Price IDs (CAD pricing)
       const priceId = planType === 'yearly' 
-        ? process.env.STRIPE_PREMIUM_YEARLY_PRICE_ID  // "price_1SGQgoBj2yIrR2RDPLSBssOB"
-        : process.env.STRIPE_PREMIUM_MONTHLY_PRICE_ID; // "price_1SGQgoBj2yIrR2RDihOHgo3b"
+        ? process.env.STRIPE_PREMIUM_YEARLY_PRICE_ID
+        : process.env.STRIPE_PREMIUM_MONTHLY_PRICE_ID;
 
       if (!priceId) {
-        throw new Error(`Price ID not found for plan type: ${planType}`);
+        throw new Error(`Price ID not found for plan type: ${planType}. Please set STRIPE_PREMIUM_MONTHLY_PRICE_ID and STRIPE_PREMIUM_YEARLY_PRICE_ID in environment variables.`);
       }
 
-      console.log(`Creating checkout session for user ${userId}, plan: ${planType}, priceId: ${priceId}`);
+      // Always include 30-day trial for new subscriptions (unless user already had one)
+      const trialDays = (includeTrial && !hasUsedTrial) ? 30 : 0;
 
-      const session = await stripe.checkout.sessions.create({
-        customer_email: user.email,
+      console.log(`Creating checkout for user ${userId}, plan: ${planType}, hasUsedTrial: ${hasUsedTrial}, trialDays: ${trialDays}`);
+
+      const sessionConfig = {
+        customer: customerId,
         payment_method_types: ['card'],
         line_items: [
           {
@@ -44,6 +159,8 @@ class StripeService {
         metadata: {
           userId: userId,
           planType: planType,
+          hasUsedTrial: hasUsedTrial.toString(),
+          source: 'extension_upgrade',
         },
         allow_promotion_codes: true,
         billing_address_collection: 'auto',
@@ -51,12 +168,30 @@ class StripeService {
           metadata: {
             userId: userId,
             planType: planType,
+            hasUsedTrial: hasUsedTrial.toString(),
+            source: 'extension_upgrade',
           },
         },
-      });
+      };
 
-      console.log(`✅ Checkout session created: ${session.id}`);
-      return { success: true, sessionId: session.id, url: session.url };
+      // Add trial period if applicable
+      if (trialDays > 0) {
+        sessionConfig.subscription_data.trial_period_days = trialDays;
+        console.log(`   Including ${trialDays}-day free trial`);
+      }
+
+      const session = await stripe.checkout.sessions.create(sessionConfig);
+
+      console.log(`✅ Checkout session created: ${session.id} (${trialDays > 0 ? `${trialDays}-day trial` : 'no trial'})`);
+      return { 
+        success: true, 
+        sessionId: session.id, 
+        url: session.url,
+        checkoutUrl: session.url, // Alias for compatibility
+        hasUsedTrial: hasUsedTrial,
+        trialDays: trialDays,
+        planType: planType
+      };
     } catch (error) {
       console.error('Stripe checkout error:', error);
       return { success: false, error: error.message };
@@ -182,10 +317,12 @@ class StripeService {
         process.env.STRIPE_WEBHOOK_SECRET
       );
 
-      console.log(`Processing webhook event: ${event.type}`);
+      console.log(`📩 Processing webhook event: ${event.type}`);
 
       switch (event.type) {
         case 'checkout.session.completed':
+          return await this.handleCheckoutCompleted(event.data.object);
+        case 'customer.subscription.created':
           return await this.handleSubscriptionCreated(event.data.object);
         case 'customer.subscription.updated':
           return await this.handleSubscriptionUpdated(event.data.object);
@@ -205,22 +342,39 @@ class StripeService {
     }
   }
 
-  static async handleSubscriptionCreated(session) {
+  static async handleCheckoutCompleted(session) {
     try {
       console.log('🔔 WEBHOOK: checkout.session.completed');
       console.log('Session ID:', session.id);
       console.log('Metadata:', session.metadata);
       
-      const userId = session.metadata.userId;
+      const userId = session.metadata?.userId;
+      const planType = session.metadata?.planType || 'monthly';
       
       if (!userId) {
         console.error('❌ No userId in session metadata!');
+        // Try to find user by customer email
+        if (session.customer_email) {
+          const user = await prisma.user.findFirst({
+            where: { email: session.customer_email.toLowerCase() }
+          });
+          if (user) {
+            console.log(`Found user by email: ${user.id}`);
+            // Continue with user.id
+            if (!session.subscription) {
+              return { success: true, message: 'No subscription to process' };
+            }
+            const subscription = await stripe.subscriptions.retrieve(session.subscription);
+            await this.updateUserSubscription(user.id, subscription, planType);
+            return { success: true, message: 'Checkout completed' };
+          }
+        }
         throw new Error('No userId found in session metadata');
       }
       
       if (!session.subscription) {
-        console.error('❌ No subscription in session!');
-        throw new Error('No subscription found in session');
+        console.log('No subscription in session (might be one-time payment)');
+        return { success: true, message: 'No subscription to process' };
       }
       
       console.log('Retrieving subscription:', session.subscription);
@@ -229,50 +383,180 @@ class StripeService {
       console.log('Subscription details:', {
         id: subscription.id,
         customer: subscription.customer,
-        status: subscription.status
+        status: subscription.status,
+        trial_end: subscription.trial_end
       });
       
-      // Update user to premium in database
-      console.log('Updating user in database:', userId);
-      const updatedUser = await prisma.user.update({
-        where: { id: userId },
-        data: {
-          isPremium: true,
-          stripeCustomerId: subscription.customer,
-          subscriptionId: subscription.id,
+      await this.updateUserSubscription(userId, subscription, planType);
+
+      console.log(`✅ User ${userId} subscription activated!`);
+      return { success: true, message: 'Checkout completed' };
+    } catch (error) {
+      console.error('❌ Error handling checkout completion:', error);
+      throw error;
+    }
+  }
+
+  // Helper method to update user subscription data
+  static async updateUserSubscription(userId, subscription, planType) {
+    const trialStartDate = subscription.trial_start 
+      ? new Date(subscription.trial_start * 1000) 
+      : null;
+    const trialEndDate = subscription.trial_end 
+      ? new Date(subscription.trial_end * 1000) 
+      : null;
+    const isTrialing = subscription.status === 'trialing' || subscription.trial_end !== null;
+    
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        isPremium: ['active', 'trialing'].includes(subscription.status),
+        stripeCustomerId: subscription.customer,
+        stripeSubscriptionId: subscription.id,
+        subscriptionStatus: subscription.status,
+        trialActive: isTrialing,
+        trialStartDate: trialStartDate,
+        trialEndDate: trialEndDate,
+        planType: planType,
+      }
+    });
+
+    if (trialEndDate) {
+      const daysRemaining = Math.ceil((trialEndDate - new Date()) / (1000 * 60 * 60 * 24));
+      console.log(`   Trial ends in ${daysRemaining} days: ${trialEndDate.toISOString()}`);
+    }
+
+    return updatedUser;
+  }
+
+  static async handleSubscriptionCreated(subscription) {
+    try {
+      console.log('🔔 WEBHOOK: customer.subscription.created');
+      console.log('Subscription ID:', subscription.id);
+      console.log('Status:', subscription.status);
+      console.log('Trial start:', subscription.trial_start);
+      console.log('Trial end:', subscription.trial_end);
+      console.log('Current period end:', subscription.current_period_end);
+      
+      const userId = subscription.metadata?.userId;
+      const planType = subscription.metadata?.planType || 'monthly';
+      
+      // Prepare trial dates if subscription has a trial
+      const trialStartDate = subscription.trial_start 
+        ? new Date(subscription.trial_start * 1000) 
+        : null;
+      const trialEndDate = subscription.trial_end 
+        ? new Date(subscription.trial_end * 1000) 
+        : null;
+      
+      // Determine if subscription is in trial period
+      const isTrialing = subscription.status === 'trialing' || subscription.trial_end !== null;
+      
+      const updateData = {
+        stripeSubscriptionId: subscription.id,
+        stripeCustomerId: subscription.customer,
+        subscriptionStatus: subscription.status,
+        isPremium: ['active', 'trialing'].includes(subscription.status),
+        trialStartDate: trialStartDate,
+        trialEndDate: trialEndDate,
+        trialActive: isTrialing,
+        planType: planType,
+      };
+      
+      if (!userId) {
+        // Try to find user by customer ID or email
+        let user = await prisma.user.findFirst({
+          where: { stripeCustomerId: subscription.customer }
+        });
+        
+        // If not found by customer ID, try to find by email from customer object
+        if (!user) {
+          try {
+            const customer = await stripe.customers.retrieve(subscription.customer);
+            if (customer.email) {
+              user = await prisma.user.findFirst({
+                where: { email: customer.email.toLowerCase() }
+              });
+            }
+          } catch (e) {
+            console.log('Could not retrieve customer:', e.message);
+          }
         }
+        
+        if (user) {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: updateData
+          });
+          console.log(`✅ Updated subscription for user ${user.id} (found by customer/email)`);
+          if (trialEndDate) {
+            const daysRemaining = Math.ceil((trialEndDate - new Date()) / (1000 * 60 * 60 * 24));
+            console.log(`   Trial ends in ${daysRemaining} days: ${trialEndDate.toISOString()}`);
+          }
+        } else {
+          console.log('⚠️ Could not find user for subscription');
+        }
+        return { success: true, message: 'Subscription created' };
+      }
+      
+      await prisma.user.update({
+        where: { id: userId },
+        data: updateData
       });
 
-      console.log(`✅ User ${userId} upgraded to premium successfully!`);
-      console.log('Updated user:', {
-        id: updatedUser.id,
-        email: updatedUser.email,
-        isPremium: updatedUser.isPremium,
-        subscriptionId: updatedUser.subscriptionId
-      });
-      
-      return { success: true, message: 'User upgraded to premium' };
+      console.log(`✅ Subscription created for user ${userId}, status: ${subscription.status}`);
+      if (trialEndDate) {
+        const daysRemaining = Math.ceil((trialEndDate - new Date()) / (1000 * 60 * 60 * 24));
+        console.log(`   Trial ends in ${daysRemaining} days: ${trialEndDate.toISOString()}`);
+      }
+      return { success: true, message: 'Subscription created' };
     } catch (error) {
-      console.error('❌ Error handling subscription creation:', error);
+      console.error('Error handling subscription creation:', error);
       throw error;
     }
   }
 
   static async handleSubscriptionUpdated(subscription) {
     try {
+      console.log('🔔 WEBHOOK: customer.subscription.updated');
+      console.log('Subscription ID:', subscription.id);
+      console.log('Status:', subscription.status);
+      
       const user = await prisma.user.findFirst({
-        where: { subscriptionId: subscription.id }
+        where: { stripeSubscriptionId: subscription.id }
       });
 
       if (user) {
+        const isPremium = ['active', 'trialing'].includes(subscription.status);
+        
         await prisma.user.update({
           where: { id: user.id },
           data: {
-            isPremium: subscription.status === 'active',
+            isPremium: isPremium,
+            subscriptionStatus: subscription.status,
           }
         });
 
         console.log(`✅ Updated subscription status for user ${user.id}: ${subscription.status}`);
+      } else {
+        // Try to find by customer ID
+        const userByCustomer = await prisma.user.findFirst({
+          where: { stripeCustomerId: subscription.customer }
+        });
+        
+        if (userByCustomer) {
+          const isPremium = ['active', 'trialing'].includes(subscription.status);
+          
+          await prisma.user.update({
+            where: { id: userByCustomer.id },
+            data: {
+              stripeSubscriptionId: subscription.id,
+              isPremium: isPremium,
+              subscriptionStatus: subscription.status,
+            }
+          });
+          console.log(`✅ Updated subscription for user ${userByCustomer.id} (found by customer ID)`);
+        }
       }
 
       return { success: true, message: 'Subscription updated' };
@@ -284,8 +568,11 @@ class StripeService {
 
   static async handleSubscriptionDeleted(subscription) {
     try {
+      console.log('🔔 WEBHOOK: customer.subscription.deleted');
+      console.log('Subscription ID:', subscription.id);
+      
       const user = await prisma.user.findFirst({
-        where: { subscriptionId: subscription.id }
+        where: { stripeSubscriptionId: subscription.id }
       });
 
       if (user) {
@@ -293,7 +580,8 @@ class StripeService {
           where: { id: user.id },
           data: {
             isPremium: false,
-            subscriptionId: null,
+            stripeSubscriptionId: null,
+            subscriptionStatus: 'canceled',
           }
         });
 
@@ -308,13 +596,60 @@ class StripeService {
   }
 
   static async handlePaymentSucceeded(invoice) {
-    console.log(`✅ Payment succeeded for subscription: ${invoice.subscription}`);
-    return { success: true, message: 'Payment succeeded' };
+    try {
+      console.log('🔔 WEBHOOK: invoice.payment_succeeded');
+      console.log('Subscription:', invoice.subscription);
+      
+      if (invoice.subscription) {
+        const user = await prisma.user.findFirst({
+          where: { stripeSubscriptionId: invoice.subscription }
+        });
+
+        if (user) {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: {
+              isPremium: true,
+              subscriptionStatus: 'active',
+            }
+          });
+          console.log(`✅ Payment succeeded, user ${user.id} status: active`);
+        }
+      }
+      
+      return { success: true, message: 'Payment succeeded' };
+    } catch (error) {
+      console.error('Error handling payment success:', error);
+      throw error;
+    }
   }
 
   static async handlePaymentFailed(invoice) {
-    console.log(`❌ Payment failed for subscription: ${invoice.subscription}`);
-    return { success: true, message: 'Payment failed' };
+    try {
+      console.log('🔔 WEBHOOK: invoice.payment_failed');
+      console.log('Subscription:', invoice.subscription);
+      
+      if (invoice.subscription) {
+        const user = await prisma.user.findFirst({
+          where: { stripeSubscriptionId: invoice.subscription }
+        });
+
+        if (user) {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: {
+              subscriptionStatus: 'past_due',
+            }
+          });
+          console.log(`⚠️ Payment failed, user ${user.id} status: past_due`);
+        }
+      }
+      
+      return { success: true, message: 'Payment failed recorded' };
+    } catch (error) {
+      console.error('Error handling payment failure:', error);
+      throw error;
+    }
   }
 
   // Get pricing information for frontend
@@ -327,7 +662,7 @@ class StripeService {
 
       const pricingInfo = prices.data.map(price => ({
         id: price.id,
-        amount: price.unit_amount / 100, // Convert from cents
+        amount: price.unit_amount / 100,
         currency: price.currency,
         interval: price.recurring.interval,
         intervalCount: price.recurring.interval_count,
