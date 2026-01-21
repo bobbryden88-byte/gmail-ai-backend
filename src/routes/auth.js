@@ -4,20 +4,24 @@ const bcrypt = require('bcryptjs');
 const { PrismaClient } = require('@prisma/client');
 const rateLimit = require('express-rate-limit');
 const { verifyGoogleToken } = require('../services/google-auth');
+const StripeService = require('../services/stripe');
 
 const router = express.Router();
 const prisma = new PrismaClient();
 
+// Cutoff date for card-on-file requirement (users created before this are grandfathered)
+const CARD_REQUIRED_CUTOFF = new Date('2025-01-21T00:00:00Z');
+
 // Rate limiting for auth endpoints
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // limit each IP to 5 requests per windowMs
+  max: 10, // limit each IP to 10 requests per windowMs
   message: { error: 'Too many authentication attempts, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-// Register new user
+// Register new user - starts 30-day free trial immediately (no card required)
 router.post('/register', authLimiter, async (req, res) => {
   try {
     const { email, name, password } = req.body;
@@ -33,7 +37,11 @@ router.post('/register', authLimiter, async (req, res) => {
 
     // Check if user already exists
     const existingUser = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() }
+      where: { email: email.toLowerCase() },
+      select: {
+        id: true,
+        email: true
+      }
     });
 
     if (existingUser) {
@@ -44,15 +52,24 @@ router.post('/register', authLimiter, async (req, res) => {
     const saltRounds = 12;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
-    // Create user
+    // Calculate trial dates (30 days from now)
+    const trialStartDate = new Date();
+    const trialEndDate = new Date();
+    trialEndDate.setDate(trialEndDate.getDate() + 30);
+
+    // Create user with 30-day trial (no card required)
     const user = await prisma.user.create({
       data: {
         email: email.toLowerCase(),
         name: name || '',
         password: hashedPassword,
-        isPremium: false,
+        isPremium: true, // Full access during trial
         dailyUsage: 0,
-        monthlyUsage: 0
+        monthlyUsage: 0,
+        subscriptionStatus: 'trialing',
+        trialActive: true,
+        trialStartDate: trialStartDate,
+        trialEndDate: trialEndDate,
       }
     });
 
@@ -61,23 +78,40 @@ router.post('/register', authLimiter, async (req, res) => {
       { 
         userId: user.id, 
         email: user.email,
-        isPremium: user.isPremium 
+        isPremium: true 
       },
       process.env.JWT_SECRET,
       { expiresIn: '30d' }
     );
 
-    console.log(`✅ New user registered: ${user.email} (ID: ${user.id})`);
+    console.log(`✅ New user registered: ${user.email} - 30-day trial started`);
 
     res.status(201).json({
       success: true,
-      message: 'User registered successfully',
+      message: 'Your 30-day free trial starts now! You\'ll be converted to freemium on day 31 unless you subscribe.',
       token,
       user: {
         id: user.id,
         email: user.email,
         name: user.name,
-        isPremium: user.isPremium
+        isPremium: true,
+        trialActive: true,
+        trialStartDate: trialStartDate.toISOString(),
+        trialEndDate: trialEndDate.toISOString(),
+        trialDaysRemaining: 30,
+        subscriptionStatus: 'trialing'
+      },
+      trial: {
+        active: true,
+        startDate: trialStartDate.toISOString(),
+        endDate: trialEndDate.toISOString(),
+        daysRemaining: 30,
+        benefits: [
+          '✅ 30 Days FREE - No Charge Yet',
+          '✅ Full Pro Access During Trial',
+          '✅ Auto-converts to freemium on day 31',
+          '✅ Upgrade anytime to keep Pro features'
+        ]
       }
     });
 
@@ -99,7 +133,24 @@ router.post('/login', authLimiter, async (req, res) => {
 
     // Find user
     const user = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() }
+      where: { email: email.toLowerCase() },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        password: true,
+        isPremium: true,
+        dailyUsage: true,
+        monthlyUsage: true,
+        subscriptionStatus: true,
+        trialActive: true,
+        trialStartDate: true,
+        trialEndDate: true,
+        stripeSubscriptionId: true,
+        stripeCustomerId: true,
+        planType: true,
+        createdAt: true
+      }
     });
 
     if (!user) {
@@ -133,6 +184,34 @@ router.post('/login', authLimiter, async (req, res) => {
       { expiresIn: '30d' }
     );
 
+    // Check if user needs to complete payment (created after cutoff, no subscription)
+    const needsPayment = user.createdAt >= CARD_REQUIRED_CUTOFF && 
+                         !user.stripeSubscriptionId && 
+                         user.subscriptionStatus !== 'active' &&
+                         user.subscriptionStatus !== 'trialing';
+
+    let checkoutUrl = null;
+    if (needsPayment) {
+      const baseUrl = process.env.FRONTEND_URL || 'https://gmail-ai-backend.vercel.app';
+      const checkoutResult = await StripeService.createTrialCheckoutSession(
+        user.id,
+        user.email,
+        `${baseUrl}/payment-success`,
+        `${baseUrl}/payment-cancelled`
+      );
+      if (checkoutResult.success) {
+        checkoutUrl = checkoutResult.url;
+      }
+    }
+
+    // Calculate trial days remaining if on trial
+    let trialDaysRemaining = 0;
+    if (user.subscriptionStatus === 'trialing' && user.trialEndDate) {
+      const now = new Date();
+      const trialEnd = new Date(user.trialEndDate);
+      trialDaysRemaining = Math.max(0, Math.ceil((trialEnd - now) / (1000 * 60 * 60 * 24)));
+    }
+
     console.log(`✅ User logged in: ${user.email} (ID: ${user.id})`);
 
     res.json({
@@ -146,27 +225,23 @@ router.post('/login', authLimiter, async (req, res) => {
         isPremium: user.isPremium,
         dailyUsage: user.dailyUsage,
         monthlyUsage: user.monthlyUsage
-      }
+      },
+      subscription: {
+        status: user.subscriptionStatus,
+        trialDaysRemaining: trialDaysRemaining,
+        trialEndDate: user.trialEndDate
+      },
+      requiresPayment: needsPayment,
+      checkoutUrl: checkoutUrl
     });
 
   } catch (error) {
     console.error('Login error:', error);
-    console.error('Login error details:', {
-      message: error.message,
-      stack: error.stack,
-      name: error.name
-    });
-    
-    // Provide more specific error messages
-    if (error.message && error.message.includes('Prisma')) {
-      return res.status(500).json({ error: 'Database connection error. Please try again later.' });
-    }
-    
     res.status(500).json({ error: 'Failed to login. Please try again.' });
   }
 });
 
-// Google OAuth authentication
+// Google OAuth authentication - returns checkout URL for new users
 router.post('/google', async (req, res) => {
   try {
     console.log('Google OAuth request received:', {
@@ -181,13 +256,9 @@ router.post('/google', async (req, res) => {
     let googleUser;
 
     // Support both ID token (for web apps) and direct user info (for Chrome extensions)
-    // Chrome extensions using chrome.identity.getAuthToken() send direct user info
-    // Web apps send ID tokens that need verification
     if (email && googleId) {
-      // Direct user info from Chrome extension (preferred method)
-      // chrome.identity.getAuthToken() gets access token, extension fetches user info from Google API
-      // No token verification needed - trust the user info from Google API
-      console.log('Using direct user info from Chrome extension (no token verification needed)');
+      // Direct user info from Chrome extension
+      console.log('Using direct user info from Chrome extension');
       googleUser = {
         email: email.toLowerCase(),
         name: name || email.split('@')[0],
@@ -195,13 +266,12 @@ router.post('/google', async (req, res) => {
         picture: picture
       };
     } else if (idToken) {
-      // Verify Google ID token (for web apps that send ID tokens)
+      // Verify Google ID token (for web apps)
       try {
         googleUser = await verifyGoogleToken(idToken);
         console.log('Google token verified successfully');
       } catch (tokenError) {
         console.error('Google token verification failed:', tokenError);
-        // If token verification fails but we have email/googleId, fall back to direct user info
         if (email && googleId) {
           console.log('Token verification failed, using direct user info as fallback');
           googleUser = {
@@ -233,16 +303,35 @@ router.post('/google', async (req, res) => {
     console.log('Processing Google OAuth for user:', googleUser.email);
 
     // Find existing user by email or googleId
-    console.log('Searching for user with email:', googleUser.email, 'or googleId:', googleUser.googleId);
     let user = await prisma.user.findFirst({
       where: {
         OR: [
           { email: googleUser.email },
           { googleId: googleUser.googleId }
         ]
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        googleId: true,
+        authProvider: true,
+        password: true,
+        isPremium: true,
+        dailyUsage: true,
+        monthlyUsage: true,
+        subscriptionStatus: true,
+        trialActive: true,
+        trialStartDate: true,
+        trialEndDate: true,
+        stripeSubscriptionId: true,
+        stripeCustomerId: true,
+        planType: true,
+        createdAt: true
       }
     });
-    console.log('User lookup result:', user ? `Found user ${user.id}` : 'User not found');
+
+    let isNewUser = false;
 
     if (user) {
       // User exists - update Google info if needed
@@ -252,70 +341,102 @@ router.post('/google', async (req, res) => {
           data: {
             googleId: googleUser.googleId,
             authProvider: 'google',
-            // Update name if not set
             name: user.name || googleUser.name
-          }
-        });
-      }
-      
-      // If user was created with email/password, link Google account
-      if (user.authProvider !== 'google') {
-        user = await prisma.user.update({
-          where: { id: user.id },
-          data: {
-            googleId: googleUser.googleId,
-            authProvider: 'google' // Allow both methods
           }
         });
       }
       
       console.log(`✅ User logged in via Google: ${user.email} (ID: ${user.id})`);
     } else {
-      // New user - create account
-      console.log('Creating new user for:', googleUser.email);
-      try {
-        user = await prisma.user.create({
-          data: {
-            email: googleUser.email,
-            name: googleUser.name,
-            googleId: googleUser.googleId,
-            authProvider: 'google',
-            password: null, // Google users don't have passwords
-            isPremium: false,
-            dailyUsage: 0,
-            monthlyUsage: 0
-          }
-        });
-        console.log(`✅ New user registered via Google: ${user.email} (ID: ${user.id})`);
-      } catch (createError) {
-        console.error('Error creating user:', createError);
-        throw createError;
-      }
+      // New user - create account with 30-day trial (no card required)
+      isNewUser = true;
+      console.log('Creating new user:', googleUser.email);
+      
+      // Calculate trial dates (30 days from now)
+      const trialStartDate = new Date();
+      const trialEndDate = new Date();
+      trialEndDate.setDate(trialEndDate.getDate() + 30);
+      
+      user = await prisma.user.create({
+        data: {
+          email: googleUser.email,
+          name: googleUser.name,
+          googleId: googleUser.googleId,
+          authProvider: 'google',
+          password: null,
+          isPremium: true, // Full access during trial
+          dailyUsage: 0,
+          monthlyUsage: 0,
+          subscriptionStatus: 'trialing',
+          trialActive: true,
+          trialStartDate: trialStartDate,
+          trialEndDate: trialEndDate,
+        }
+      });
+      console.log(`✅ New user registered via Google: ${user.email} (ID: ${user.id}) - 30-day trial started`);
     }
 
-    // Generate JWT token (same format as email/password login)
+    // Generate JWT token
     const token = jwt.sign(
       { 
         userId: user.id, 
         email: user.email,
-        isPremium: user.isPremium 
+        isPremium: user.isPremium || user.subscriptionStatus === 'trialing'
       },
       process.env.JWT_SECRET,
       { expiresIn: '30d' }
     );
 
+    // Calculate trial days remaining if on trial
+    let trialDaysRemaining = 0;
+    if ((user.subscriptionStatus === 'trialing' || user.trialActive) && user.trialEndDate) {
+      const now = new Date();
+      const trialEnd = new Date(user.trialEndDate);
+      trialDaysRemaining = Math.max(0, Math.ceil((trialEnd - now) / (1000 * 60 * 60 * 24)));
+    }
+
+    // Determine if user has full access (trial or paid)
+    const hasFullAccess = user.subscriptionStatus === 'trialing' || 
+                          user.subscriptionStatus === 'active' || 
+                          user.trialActive;
+
     res.json({
       success: true,
-      message: 'Google authentication successful',
+      message: isNewUser 
+        ? 'Your 30-day free trial starts now! You\'ll be converted to freemium on day 31 unless you subscribe.' 
+        : 'Google authentication successful',
       token,
       user: {
         id: user.id,
         email: user.email,
         name: user.name,
-        isPremium: user.isPremium,
+        isPremium: hasFullAccess,
         dailyUsage: user.dailyUsage || 0,
-        monthlyUsage: user.monthlyUsage || 0
-      }
+        monthlyUsage: user.monthlyUsage || 0,
+        trialActive: user.trialActive,
+        trialEndDate: user.trialEndDate,
+        trialDaysRemaining: trialDaysRemaining,
+        subscriptionStatus: user.subscriptionStatus
+      },
+      subscription: {
+        status: user.subscriptionStatus,
+        trialActive: user.trialActive,
+        trialDaysRemaining: trialDaysRemaining,
+        trialEndDate: user.trialEndDate
+      },
+      isNewUser: isNewUser,
+      trial: isNewUser ? {
+        active: true,
+        startDate: user.trialStartDate,
+        endDate: user.trialEndDate,
+        daysRemaining: 30,
+        benefits: [
+          '✅ 30 Days FREE - No Charge Yet',
+          '✅ Full Pro Access During Trial',
+          '✅ Auto-converts to freemium on day 31',
+          '✅ Upgrade anytime to keep Pro features'
+        ]
+      } : undefined
     });
 
   } catch (error) {
@@ -339,11 +460,39 @@ router.get('/verify', async (req, res) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await prisma.user.findUnique({
-      where: { id: decoded.userId }
+      where: { id: decoded.userId },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        isPremium: true,
+        subscriptionStatus: true,
+        trialActive: true,
+        trialStartDate: true,
+        trialEndDate: true,
+        stripeSubscriptionId: true,
+        stripeCustomerId: true,
+        planType: true,
+        createdAt: true
+      }
     });
 
     if (!user) {
       return res.status(401).json({ error: 'User not found' });
+    }
+
+    // Check if user needs to complete payment
+    const needsPayment = user.createdAt >= CARD_REQUIRED_CUTOFF && 
+                         !user.stripeSubscriptionId && 
+                         user.subscriptionStatus !== 'active' &&
+                         user.subscriptionStatus !== 'trialing';
+
+    // Calculate trial days remaining
+    let trialDaysRemaining = 0;
+    if (user.subscriptionStatus === 'trialing' && user.trialEndDate) {
+      const now = new Date();
+      const trialEnd = new Date(user.trialEndDate);
+      trialDaysRemaining = Math.max(0, Math.ceil((trialEnd - now) / (1000 * 60 * 60 * 24)));
     }
 
     res.json({
@@ -353,7 +502,13 @@ router.get('/verify', async (req, res) => {
         email: user.email,
         name: user.name,
         isPremium: user.isPremium
-      }
+      },
+      subscription: {
+        status: user.subscriptionStatus,
+        trialDaysRemaining: trialDaysRemaining,
+        trialEndDate: user.trialEndDate
+      },
+      requiresPayment: needsPayment
     });
 
   } catch (error) {
