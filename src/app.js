@@ -19,6 +19,7 @@ const userRoutes = require('./routes/users');
 const stripeRoutes = require('./routes/stripe');
 const passwordResetRoutes = require('./routes/password-reset');
 const trialRoutes = require('./routes/trial');
+const StripeService = require('./services/stripe');
 // Cron routes removed - Stripe handles trial expiry automatically
 const openaiService = require('./services/openai');
 
@@ -68,14 +69,48 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Cron-Secret']
 }));
 
-// Debug middleware
+// Debug middleware (skip body log for webhook to avoid huge payloads)
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-  if (req.body && Object.keys(req.body).length > 0) {
+  if (req.path !== '/api/stripe/webhook' && req.body && Object.keys(req.body).length > 0) {
     console.log('Body:', req.body);
   }
   next();
 });
+
+// ----- STRIPE WEBHOOK (must be BEFORE express.json()) -----
+// Stripe requires the RAW body for signature verification. express.json() consumes
+// the body, so we handle the webhook here with express.raw() and never touch json.
+app.post(
+  '/api/stripe/webhook',
+  express.raw({ type: 'application/json' }),
+  async (req, res) => {
+    console.log('🔔 [STRIPE WEBHOOK] POST /api/stripe/webhook received');
+    try {
+      const signature = req.headers['stripe-signature'];
+      if (!signature) {
+        console.error('❌ [STRIPE WEBHOOK] Missing Stripe-Signature header');
+        return res.status(400).json({ error: 'Missing Stripe signature' });
+      }
+      if (!process.env.STRIPE_WEBHOOK_SECRET) {
+        console.error('❌ [STRIPE WEBHOOK] STRIPE_WEBHOOK_SECRET not set');
+        return res.status(500).json({ error: 'Webhook secret not configured' });
+      }
+      console.log('📩 [STRIPE WEBHOOK] Processing event (raw body length:', req.body?.length ?? 0, ')');
+      const result = await StripeService.handleWebhook(req.body, signature);
+      console.log('✅ [STRIPE WEBHOOK] Processed successfully:', result?.message ?? 'ok');
+      return res.status(200).json({ received: true, success: true, message: result?.message ?? 'Webhook processed' });
+    } catch (err) {
+      console.error('❌ [STRIPE WEBHOOK] Error:', err.message);
+      console.error('❌ [STRIPE WEBHOOK] Stack:', err.stack);
+      return res.status(200).json({
+        received: true,
+        error: err.message,
+        note: 'Error logged; 200 returned to avoid Stripe retries',
+      });
+    }
+  }
+);
 
 app.use(express.json());
 
@@ -225,6 +260,7 @@ if (process.env.VERCEL !== '1' && !process.env.VERCEL_ENV) {
     console.log(`   - GET  /api/stripe/pricing`);
     console.log(`   - POST /api/stripe/create-checkout-session`);
     console.log(`   - POST /api/stripe/success`);
+    console.log(`   - POST /api/stripe/webhook (raw body)`);
     console.log(`   - POST /api/stripe/cancel-subscription`);
     console.log(`   - GET  /api/stripe/subscription-status`);
     console.log(`🆓 Trial endpoints:`);

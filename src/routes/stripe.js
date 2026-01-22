@@ -496,38 +496,8 @@ router.get('/subscription-status', authenticateToken, async (req, res) => {
   }
 });
 
-// Stripe webhook handler (no authentication required)
-router.post('/webhook', express.raw({type: 'application/json'}), async (req, res) => {
-  try {
-    const signature = req.headers['stripe-signature'];
-    
-    if (!signature) {
-      console.error('❌ Webhook request missing Stripe signature');
-      return res.status(400).json({ error: 'Missing Stripe signature' });
-    }
-
-    console.log('📩 Webhook received, processing...');
-    const result = await StripeService.handleWebhook(req.body, signature);
-    
-    console.log('✅ Webhook processed successfully:', result);
-    res.json({ received: true, success: true, message: result?.message || 'Webhook processed' });
-  } catch (error) {
-    console.error('❌ Webhook processing error:', error);
-    console.error('Error details:', {
-      message: error.message,
-      stack: error.stack,
-      name: error.name
-    });
-    
-    // Return 200 to Stripe to prevent retries for non-recoverable errors
-    // But log the error for debugging
-    res.status(200).json({ 
-      received: true, 
-      error: error.message,
-      note: 'Error logged but webhook acknowledged to prevent retries'
-    });
-  }
-});
+// Stripe webhook: handled in app.js (POST /api/stripe/webhook) BEFORE express.json()
+// so it receives the raw body for signature verification. Do not add it here.
 
 // Create customer portal session (for subscription management)
 router.post('/create-portal-session', authenticateToken, async (req, res) => {
