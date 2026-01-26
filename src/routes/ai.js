@@ -443,9 +443,13 @@ router.post('/summarize', authenticateToken, checkUsageLimit, async (req, res) =
       };
     }
 
-    // Determine remaining usage for limited users
-    const isFreemium = req.user.subscriptionStatus === 'freemium';
-    const computedUsage = !hasFullAccess ? await getDailySummaryUsage(req.user.id, 2) : null;
+    // Determine remaining usage for response (always include counts)
+    const usageCounts = await getDailySummaryUsage(req.user.id, 2);
+    console.log('✅ [SUMMARY] Response counts:', {
+      used: usageCounts.used,
+      remaining: usageCounts.remaining,
+      daily_limit: usageCounts.limit
+    });
     
     // Return summary in a clean format
     res.json({
@@ -457,15 +461,9 @@ router.post('/summarize', authenticateToken, checkUsageLimit, async (req, res) =
       urgency: parsedResponse.urgency,
       tokensUsed: result.tokensUsed,
       cost: result.cost,
-      ...(req.freemiumUsage ? {
-        daily_limit: req.freemiumUsage.limit,
-        summaries_used_today: req.freemiumUsage.used + 1,
-        summaries_remaining: Math.max(0, req.freemiumUsage.remaining)
-      } : computedUsage ? {
-        daily_limit: computedUsage.limit,
-        summaries_used_today: computedUsage.used,
-        summaries_remaining: computedUsage.remaining
-      } : {}),
+      daily_limit: usageCounts.limit,
+      summaries_used_today: usageCounts.used,
+      summaries_remaining: usageCounts.remaining,
       // Include usage info for limited users
       ...(req.freemiumUsage ? {
         usage: {
