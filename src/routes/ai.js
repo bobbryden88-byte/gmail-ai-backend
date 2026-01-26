@@ -378,6 +378,25 @@ router.post('/summarize', authenticateToken, checkUsageLimit, async (req, res) =
       subscriptionStatus: req.user.subscriptionStatus
     });
 
+    const hasFullAccess = req.user.subscriptionStatus === 'trialing' ||
+      req.user.subscriptionStatus === 'active' ||
+      req.user.trialActive ||
+      req.user.isPremium;
+
+    if (!hasFullAccess) {
+      const dailyUsage = await getDailySummaryUsage(req.user.id, 2);
+      if (dailyUsage.used >= 2) {
+        return res.status(429).json({
+          success: false,
+          daily_limit_reached: true,
+          summaries_used_today: dailyUsage.used,
+          summaries_remaining: 0,
+          daily_limit: 2,
+          error: 'Daily limit reached. Upgrade to Pro for unlimited access.'
+        });
+      }
+    }
+
     // Use the existing OpenAI service to generate summary
     const result = await openaiService.generateEmailResponse(
       {
@@ -426,6 +445,7 @@ router.post('/summarize', authenticateToken, checkUsageLimit, async (req, res) =
 
     // Determine remaining usage for limited users
     const isFreemium = req.user.subscriptionStatus === 'freemium';
+    const computedUsage = !hasFullAccess ? await getDailySummaryUsage(req.user.id, 2) : null;
     
     // Return summary in a clean format
     res.json({
@@ -441,6 +461,10 @@ router.post('/summarize', authenticateToken, checkUsageLimit, async (req, res) =
         daily_limit: req.freemiumUsage.limit,
         summaries_used_today: req.freemiumUsage.used + 1,
         summaries_remaining: Math.max(0, req.freemiumUsage.remaining)
+      } : computedUsage ? {
+        daily_limit: computedUsage.limit,
+        summaries_used_today: computedUsage.used,
+        summaries_remaining: computedUsage.remaining
       } : {}),
       // Include usage info for limited users
       ...(req.freemiumUsage ? {
