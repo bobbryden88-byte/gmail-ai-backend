@@ -716,6 +716,8 @@ Return ONLY valid JSON with no markdown:
       creative: emails?.creative
     });
 
+    console.log('📧 [COMPOSE] Cleaned text (no embedded newlines) for response');
+
     // Update user usage
     await prisma.user.update({
       where: { id: req.user.id },
