@@ -679,6 +679,43 @@ Return ONLY valid JSON with no markdown:
       };
     }
 
+    const cleanEmailBody = (body) => {
+      if (!body || typeof body !== 'string') {
+        return body;
+      }
+
+      const normalized = body.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      const paragraphs = normalized
+        .split(/\n{2,}/)
+        .map((paragraph) => paragraph
+          .split('\n')
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0)
+          .join(' ')
+        )
+        .filter((paragraph) => paragraph.length > 0);
+
+      return paragraphs.join('\n\n');
+    };
+
+    console.log('📧 [COMPOSE] RAW AI RESPONSE:', {
+      professional: emails?.professional,
+      casual: emails?.casual,
+      creative: emails?.creative
+    });
+
+    emails = {
+      professional: cleanEmailBody(emails?.professional),
+      casual: cleanEmailBody(emails?.casual),
+      creative: cleanEmailBody(emails?.creative)
+    };
+
+    console.log('📧 [COMPOSE] CLEANED RESPONSE:', {
+      professional: emails?.professional,
+      casual: emails?.casual,
+      creative: emails?.creative
+    });
+
     // Update user usage
     await prisma.user.update({
       where: { id: req.user.id },
