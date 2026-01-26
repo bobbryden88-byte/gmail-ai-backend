@@ -37,6 +37,7 @@ const checkUsageLimit = async (req, res, next) => {
     const isActive = currentUser.subscriptionStatus === 'active';
     const isFreemium = currentUser.subscriptionStatus === 'freemium';
     const hasFullAccess = isTrialing || isActive || currentUser.isPremium;
+    const isLimitedUser = !hasFullAccess; // Free/pending users share the 2/day limit
 
     console.log('📊 Usage check:', {
       userId: user.id,
@@ -48,26 +49,24 @@ const checkUsageLimit = async (req, res, next) => {
       hasFullAccess
     });
 
-    // FREEMIUM USERS: Check 2 summaries per day limit using SummaryLog
-    if (isFreemium && !hasFullAccess) {
-      const summariesUsedToday = await prisma.summaryLog.count({
-        where: {
-          userId: currentUser.id,
-          createdAt: { gte: todayStart }
-        }
-      });
-
+    // FREE USERS (freemium/pending): Check 2 summaries per day limit using SummaryLog
+    if (isLimitedUser) {
       const FREEMIUM_DAILY_LIMIT = 2;
+      const dailyUsage = await getDailySummaryUsage(currentUser.id, FREEMIUM_DAILY_LIMIT);
 
-      console.log(`📊 Freemium user ${currentUser.email}: ${summariesUsedToday}/${FREEMIUM_DAILY_LIMIT} summaries used today`);
+      console.log(`📊 Free user ${currentUser.email}: ${dailyUsage.used}/${FREEMIUM_DAILY_LIMIT} summaries used today`);
 
-      if (summariesUsedToday >= FREEMIUM_DAILY_LIMIT) {
+      if (dailyUsage.used >= FREEMIUM_DAILY_LIMIT) {
         return res.status(429).json({
           error: 'Daily limit reached',
           message: 'Free users get 2 AI requests per day. Upgrade to Pro for unlimited access!',
           type: 'freemium_daily_limit',
+          daily_limit_reached: true,
+          summaries_used_today: dailyUsage.used,
+          summaries_remaining: 0,
+          daily_limit: FREEMIUM_DAILY_LIMIT,
           limit: FREEMIUM_DAILY_LIMIT,
-          used: summariesUsedToday,
+          used: dailyUsage.used,
           remaining: 0,
           subscriptionStatus: 'freemium',
           upgradeUrl: process.env.UPGRADE_URL || 'https://gmail-ai-backend.vercel.app/pricing',
@@ -82,9 +81,9 @@ const checkUsageLimit = async (req, res, next) => {
 
       // Store usage info in request for later
       req.freemiumUsage = {
-        used: summariesUsedToday,
+        used: dailyUsage.used,
         limit: FREEMIUM_DAILY_LIMIT,
-        remaining: FREEMIUM_DAILY_LIMIT - summariesUsedToday - 1 // -1 for this request
+        remaining: FREEMIUM_DAILY_LIMIT - dailyUsage.used - 1 // -1 for this request
       };
     }
 
@@ -170,15 +169,35 @@ const checkUsageLimit = async (req, res, next) => {
 // Helper function to log usage for freemium tracking
 async function logSummaryUsage(userId, type = 'ai_request') {
   try {
-    await prisma.summaryLog.create({
+    const record = await prisma.summaryLog.create({
       data: {
         userId: userId,
         type: type
       }
     });
+    console.log('📊 SummaryLog created:', { id: record.id, userId, type });
+    return record;
   } catch (error) {
     console.error('Error logging summary usage:', error);
+    return null;
   }
+}
+
+// Helper to get today's usage count for limited users
+async function getDailySummaryUsage(userId, limit = 2) {
+  const today = new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const used = await prisma.summaryLog.count({
+    where: {
+      userId,
+      createdAt: { gte: todayStart }
+    }
+  });
+  return {
+    used,
+    limit,
+    remaining: Math.max(0, limit - used)
+  };
 }
 
 
@@ -310,8 +329,8 @@ router.post('/generate', authenticateToken, aiRateLimit, checkUsageLimit, async 
         dailyLimit: hasFullAccess ? 100 : 2,
         monthlyLimit: hasFullAccess ? 3000 : 60,
         subscriptionStatus: req.user.subscriptionStatus,
-        // For freemium users, include remaining count
-        ...(isFreemium && req.freemiumUsage ? {
+        // For limited users, include remaining count
+        ...(req.freemiumUsage ? {
           freemiumUsed: req.freemiumUsage.used + 1,
           freemiumLimit: req.freemiumUsage.limit,
           freemiumRemaining: Math.max(0, req.freemiumUsage.remaining)
@@ -405,7 +424,7 @@ router.post('/summarize', authenticateToken, checkUsageLimit, async (req, res) =
       };
     }
 
-    // Determine remaining usage for freemium users
+    // Determine remaining usage for limited users
     const isFreemium = req.user.subscriptionStatus === 'freemium';
     
     // Return summary in a clean format
@@ -418,8 +437,13 @@ router.post('/summarize', authenticateToken, checkUsageLimit, async (req, res) =
       urgency: parsedResponse.urgency,
       tokensUsed: result.tokensUsed,
       cost: result.cost,
-      // Include usage info for freemium users
-      ...(isFreemium && req.freemiumUsage ? {
+      ...(req.freemiumUsage ? {
+        daily_limit: req.freemiumUsage.limit,
+        summaries_used_today: req.freemiumUsage.used + 1,
+        summaries_remaining: Math.max(0, req.freemiumUsage.remaining)
+      } : {}),
+      // Include usage info for limited users
+      ...(req.freemiumUsage ? {
         usage: {
           used: req.freemiumUsage.used + 1,
           limit: req.freemiumUsage.limit,
@@ -561,9 +585,17 @@ Return ONLY the email body text (no JSON, no subject line, just the reply conten
       }
     });
 
+    // Log usage for freemium tracking
+    await logSummaryUsage(req.user.id, 'reply_generate');
+
     res.json({
       success: true,
-      replyBody: result.response.trim()
+      replyBody: result.response.trim(),
+      ...(req.freemiumUsage ? {
+        daily_limit: req.freemiumUsage.limit,
+        summaries_used_today: req.freemiumUsage.used + 1,
+        summaries_remaining: Math.max(0, req.freemiumUsage.remaining)
+      } : {})
     });
 
   } catch (error) {
@@ -634,9 +666,17 @@ Return ONLY valid JSON with no markdown:
       }
     });
 
+    // Log usage for freemium tracking
+    await logSummaryUsage(req.user.id, 'compose_generate');
+
     res.json({
       success: true,
-      emails: emails
+      emails: emails,
+      ...(req.freemiumUsage ? {
+        daily_limit: req.freemiumUsage.limit,
+        summaries_used_today: req.freemiumUsage.used + 1,
+        summaries_remaining: Math.max(0, req.freemiumUsage.remaining)
+      } : {})
     });
 
   } catch (error) {

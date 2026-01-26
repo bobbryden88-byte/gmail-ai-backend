@@ -43,11 +43,12 @@ router.get('/status', authenticateToken, async (req, res) => {
     const isFreemium = user.subscriptionStatus === 'freemium';
     const isActive = user.subscriptionStatus === 'active';
     const hasFullAccess = isTrialing || isActive || user.isPremium;
+    const isLimitedUser = !hasFullAccess;
 
-    // For freemium users, get today's usage count
+    // For limited users, get today's usage count
     let dailyUsage = { used: 0, limit: 2, remaining: 2 };
     
-    if (isFreemium) {
+    if (isLimitedUser) {
       const today = new Date();
       const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
       
@@ -93,11 +94,11 @@ router.get('/status', authenticateToken, async (req, res) => {
       plan_type: user.planType,
       has_subscription: !!user.stripeSubscriptionId,
       
-      // Usage info (for freemium users)
-      daily_limit: isFreemium ? 2 : (hasFullAccess ? 100 : 2),
+      // Usage info (for limited users)
+      daily_limit: isLimitedUser ? 2 : (hasFullAccess ? 100 : 2),
       summaries_used_today: dailyUsage.used,
       summaries_remaining: dailyUsage.remaining,
-      usage_message: isFreemium 
+      usage_message: isLimitedUser 
         ? `${dailyUsage.remaining} of ${dailyUsage.limit} summaries remaining today`
         : (hasFullAccess ? 'Unlimited access' : null),
       
