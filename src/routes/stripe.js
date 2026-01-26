@@ -224,37 +224,64 @@ router.post('/success', authenticateToken, async (req, res) => {
   }
 });
 
-// Cancel subscription (sets to cancel at period end)
+// Cancel subscription immediately (removes access right away)
 router.post('/cancel-subscription', authenticateToken, stripeLimiter, async (req, res) => {
   try {
-    console.log('🚫 Cancel subscription request from user:', req.user.id);
+    console.log('🔄 [CANCEL] User requesting subscription cancellation');
     const userId = req.user.id;
 
-    // Get user's subscription ID
+    // Verify user exists
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { 
+        id: true,
+        email: true,
         stripeSubscriptionId: true, 
         isPremium: true,
-        email: true,
+        subscriptionStatus: true,
         stripeCustomerId: true
       }
     });
 
-    console.log('User subscription info:', {
+    if (!user) {
+      console.error('❌ [CANCEL] User not found:', userId);
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    console.log('🔄 [CANCEL] User subscription info:', {
+      userId: user.id,
       email: user.email,
       subscriptionId: user.stripeSubscriptionId,
       isPremium: user.isPremium,
+      subscriptionStatus: user.subscriptionStatus,
       stripeCustomerId: user.stripeCustomerId
     });
 
+    // Check if user has an active subscription
     if (!user.stripeSubscriptionId) {
-      return res.status(400).json({ error: 'No active subscription found' });
+      console.log('⚠️ [CANCEL] No subscription ID found for user');
+      return res.status(400).json({ 
+        success: false,
+        error: 'No active subscription found',
+        message: 'You do not have an active subscription to cancel'
+      });
     }
 
+    // Check if subscription is already cancelled
+    if (user.subscriptionStatus === 'canceled' || user.subscriptionStatus === 'cancelled') {
+      console.log('⚠️ [CANCEL] Subscription already cancelled');
+      return res.status(400).json({ 
+        success: false,
+        error: 'Subscription already cancelled',
+        message: 'Your subscription has already been cancelled'
+      });
+    }
+
+    let subscriptionId = user.stripeSubscriptionId;
+
     // Handle manual activation IDs - try to find real Stripe subscription
-    if (user.stripeSubscriptionId.startsWith('manual_activation_')) {
-      console.log('⚠️ Found manual activation ID, attempting to resolve real Stripe subscription...');
+    if (subscriptionId.startsWith('manual_activation_')) {
+      console.log('⚠️ [CANCEL] Found manual activation ID, attempting to resolve real Stripe subscription...');
       
       if (!user.stripeCustomerId) {
         // Try to find customer by email
@@ -267,11 +294,15 @@ router.post('/cancel-subscription', authenticateToken, stripeLimiter, async (req
         });
         
         if (customers.data.length === 0) {
-          return res.status(400).json({ error: 'No Stripe customer found for manual activation. Please contact support.' });
+          console.error('❌ [CANCEL] No Stripe customer found for manual activation');
+          return res.status(400).json({ 
+            success: false,
+            error: 'No Stripe customer found. Please contact support.' 
+          });
         }
         
         const customer = customers.data[0];
-        console.log('✅ Found Stripe customer:', customer.id);
+        console.log('✅ [CANCEL] Found Stripe customer:', customer.id);
         
         // Find active subscriptions
         const subscriptions = await stripe.subscriptions.list({
@@ -280,67 +311,99 @@ router.post('/cancel-subscription', authenticateToken, stripeLimiter, async (req
         });
         
         if (subscriptions.data.length === 0) {
-          return res.status(400).json({ error: 'No active Stripe subscription found for manual activation. Please contact support.' });
+          console.error('❌ [CANCEL] No active Stripe subscription found');
+          return res.status(400).json({ 
+            success: false,
+            error: 'No active subscription found. Please contact support.' 
+          });
         }
         
         const subscription = subscriptions.data[0];
-        console.log('✅ Found real subscription:', subscription.id);
+        subscriptionId = subscription.id;
+        console.log('✅ [CANCEL] Found real subscription:', subscriptionId);
         
         // Update user with correct IDs
         await prisma.user.update({
           where: { id: userId },
           data: {
-            stripeSubscriptionId: subscription.id,
+            stripeSubscriptionId: subscriptionId,
             stripeCustomerId: customer.id
           }
         });
         
-        console.log('✅ Updated user with correct subscription ID');
-        
-        // Use the real subscription ID for cancellation
-        const result = await StripeService.cancelSubscription(subscription.id);
-        
-        if (result.success) {
-          console.log('✅ Subscription cancelled (at period end):', result.subscription);
-          res.json({ 
-            success: true, 
-            message: 'Subscription will be cancelled at the end of the billing period',
-            subscription: result.subscription,
-            cancelAt: result.subscription.cancel_at,
-            currentPeriodEnd: result.subscription.current_period_end
-          });
-        } else {
-          console.error('❌ Failed to cancel subscription:', result.error);
-          res.status(400).json({ error: result.error });
-        }
-        return;
+        console.log('✅ [CANCEL] Updated user with correct subscription ID');
       }
     }
 
-    // Cancel at period end (user keeps access until billing period ends)
-    const result = await StripeService.cancelSubscription(user.stripeSubscriptionId);
+    // Cancel subscription immediately in Stripe
+    console.log('🔄 [CANCEL] Cancelling subscription in Stripe:', subscriptionId);
+    const result = await StripeService.cancelSubscriptionImmediately(subscriptionId);
 
-    if (result.success) {
-      console.log('✅ Subscription cancelled (at period end):', result.subscription);
-      
-      // Note: We DON'T set isPremium to false immediately
-      // User keeps premium access until period ends
-      // Webhook will handle the final status update
-
-      res.json({ 
-        success: true, 
-        message: 'Subscription will be cancelled at the end of the billing period',
-        subscription: result.subscription,
-        cancelAt: result.subscription.cancel_at,
-        currentPeriodEnd: result.subscription.current_period_end
+    if (!result.success) {
+      console.error('❌ [CANCEL] Failed to cancel subscription in Stripe:', result.error);
+      return res.status(500).json({ 
+        success: false,
+        error: result.error || 'Failed to cancel subscription in Stripe',
+        message: 'Unable to cancel subscription. Please try again or contact support.'
       });
-    } else {
-      console.error('❌ Failed to cancel subscription:', result.error);
-      res.status(400).json({ error: result.error });
+    }
+
+    console.log('✅ [CANCEL] Subscription cancelled in Stripe:', result.subscription.id);
+
+    // Update database immediately
+    console.log('🔄 [CANCEL] Updating database for user:', userId);
+    try {
+      const updatedUser = await prisma.user.update({
+        where: { id: userId },
+        data: {
+          subscriptionStatus: 'canceled',
+          isPremium: false,
+          trialActive: false,
+          trialStartDate: null,
+          trialEndDate: null,
+          // Keep stripeSubscriptionId for reference
+        }
+      });
+
+      console.log('✅ [CANCEL] Database updated for user:', userId);
+      console.log('✅ [CANCEL] Updated subscription status:', updatedUser.subscriptionStatus);
+      console.log('✅ [CANCEL] Updated isPremium:', updatedUser.isPremium);
+
+      return res.status(200).json({ 
+        success: true, 
+        message: 'Subscription cancelled successfully',
+        subscription: {
+          id: result.subscription.id,
+          status: result.subscription.status,
+          canceled_at: result.subscription.canceled_at
+        },
+        user: {
+          subscriptionStatus: updatedUser.subscriptionStatus,
+          isPremium: updatedUser.isPremium
+        }
+      });
+    } catch (dbError) {
+      console.error('❌ [CANCEL] Database update failed:', dbError);
+      // Subscription is cancelled in Stripe, but DB update failed
+      // Return success but log the error
+      return res.status(200).json({ 
+        success: true,
+        message: 'Subscription cancelled in Stripe, but database update failed. Please contact support.',
+        warning: 'Database update error',
+        subscription: {
+          id: result.subscription.id,
+          status: result.subscription.status
+        }
+      });
     }
   } catch (error) {
-    console.error('❌ Cancel subscription error:', error);
-    res.status(500).json({ error: 'Failed to cancel subscription' });
+    console.error('❌ [CANCEL] Cancel subscription error:', error);
+    console.error('❌ [CANCEL] Error stack:', error.stack);
+    return res.status(200).json({ 
+      success: false,
+      error: error.message || 'Failed to cancel subscription',
+      message: 'An error occurred while cancelling your subscription. Please try again or contact support.'
+    });
   }
 });
 

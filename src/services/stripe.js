@@ -226,7 +226,7 @@ class StripeService {
     }
   }
 
-  // Cancel subscription (at period end)
+  // Cancel subscription (at period end) - keeps access until billing period ends
   static async cancelSubscription(subscriptionId) {
     try {
       console.log('Cancelling subscription:', subscriptionId);
@@ -244,6 +244,25 @@ class StripeService {
       return { success: true, subscription };
     } catch (error) {
       console.error('Stripe cancel error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Cancel subscription immediately - removes access right away
+  static async cancelSubscriptionImmediately(subscriptionId) {
+    try {
+      console.log('🔄 [CANCEL] Cancelling subscription immediately:', subscriptionId);
+      const subscription = await stripe.subscriptions.cancel(subscriptionId);
+
+      console.log('✅ [CANCEL] Subscription cancelled in Stripe:', {
+        id: subscription.id,
+        status: subscription.status,
+        canceled_at: subscription.canceled_at
+      });
+
+      return { success: true, subscription };
+    } catch (error) {
+      console.error('❌ [CANCEL] Stripe cancel error:', error);
       return { success: false, error: error.message };
     }
   }
