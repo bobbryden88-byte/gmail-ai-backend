@@ -19,6 +19,7 @@ const userRoutes = require('./routes/users');
 const stripeRoutes = require('./routes/stripe');
 const passwordResetRoutes = require('./routes/password-reset');
 const trialRoutes = require('./routes/trial');
+const adminRoutes = require('./routes/admin');
 const StripeService = require('./services/stripe');
 // Cron routes removed - Stripe handles trial expiry automatically
 const openaiService = require('./services/openai');
@@ -66,7 +67,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Cron-Secret']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Cron-Secret', 'X-Admin-Token']
 }));
 
 // Debug middleware (skip body log for webhook to avoid huge payloads)
@@ -124,6 +125,7 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/stripe', stripeRoutes);
 app.use('/api/trial', trialRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Summarize email endpoint (direct route for /api/summarize)
 app.post('/api/summarize', async (req, res) => {
